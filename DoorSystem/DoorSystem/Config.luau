@@ -115,6 +115,13 @@ return table.freeze({
 	MaxAngularSpeedDeg = 320,
 	FreeDrag = 0.95,
 	LimitBounce = 0.16,
+	-- Ordinary pushed/free-swinging doors compress a damped spring before the hard
+	-- hinge stop. The hard clamp remains only as an overshoot safety fallback.
+	LimitSpringEnabled = true,
+	LimitSpringRangeDeg = 16,
+	LimitSpringStiffness = 60,
+	LimitSpringDamping = 14,
+	LimitSpringMaxAccelerationDeg = 6000,
 
 	-- Return spring after free-swing/coast.
 	ReturnStiffness = 13.5,

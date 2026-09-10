@@ -2486,6 +2486,22 @@ local function integrateLeaf(leaf: LeafState, dt: number)
 		leaf.velocity *= math.exp(-catchDamping * dt)
 	end
 
+	local softLimit = not guided
+		and not kickMotion
+		and not externalMotion
+		and setting(leaf.rig, leaf.assembly, "LimitSpringEnabled", Config.LimitSpringEnabled) ~= false
+	if softLimit then
+		local springRange = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "LimitSpringRangeDeg", Config.LimitSpringRangeDeg)) or Config.LimitSpringRangeDeg)
+		local springStart = math.max(0, maxAngle - springRange)
+		if math.abs(leaf.angle) > springStart then
+			local springTarget = signNonZero(leaf.angle) * springStart
+			local stiffness = tonumber(setting(leaf.rig, leaf.assembly, "LimitSpringStiffness", Config.LimitSpringStiffness)) or Config.LimitSpringStiffness
+			local damping = tonumber(setting(leaf.rig, leaf.assembly, "LimitSpringDamping", Config.LimitSpringDamping)) or Config.LimitSpringDamping
+			local maxAccel = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "LimitSpringMaxAccelerationDeg", Config.LimitSpringMaxAccelerationDeg)) or Config.LimitSpringMaxAccelerationDeg)
+			acceleration += clampAbs(springAcceleration(leaf.angle, leaf.velocity, springTarget, stiffness, damping), maxAccel)
+		end
+	end
+
 	local candidateVelocity = clampAbs(leaf.velocity + acceleration * dt, maxAngular)
 	local candidateAngle = leaf.angle + candidateVelocity * dt
 
@@ -2494,10 +2510,10 @@ local function integrateLeaf(leaf: LeafState, dt: number)
 	local limitBounce = tonumber(setting(leaf.rig, leaf.assembly, bounceName, bounceDefault)) or bounceDefault
 	if candidateAngle > maxAngle then
 		candidateAngle = maxAngle
-		candidateVelocity = -math.abs(candidateVelocity) * limitBounce
+		candidateVelocity = if softLimit then math.min(0, candidateVelocity) else -math.abs(candidateVelocity) * limitBounce
 	elseif candidateAngle < -maxAngle then
 		candidateAngle = -maxAngle
-		candidateVelocity = math.abs(candidateVelocity) * limitBounce
+		candidateVelocity = if softLimit then math.max(0, candidateVelocity) else math.abs(candidateVelocity) * limitBounce
 	end
 
 	local externalClosing = leaf.mode == "ExternalClosing" or leaf.mode == "ExternalLockClosing"
