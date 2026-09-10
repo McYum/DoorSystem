@@ -75,7 +75,9 @@ return table.freeze({
 	-- keep a brief touch from storing enough momentum to fling the leaf fully open.
 	PushTotalMaxAccelerationDeg = 720,
 	PushMaxAngularSpeedDeg = 105,
-	PushReleaseDrag = 4.8,
+	-- Preserve enough earned momentum for a committed walk-through to open the leaf,
+	-- while the acceleration ramp still keeps a brief touch to a small nudge.
+	PushReleaseDrag = 1.25,
 	-- While a player is actively pushing, the hinge also tries to match the linear
 	-- speed at the contact radius. This is what makes sprinting open the leaf faster
 	-- instead of merely applying the same weak torque as walking.
