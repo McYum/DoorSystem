@@ -1613,9 +1613,6 @@ local DEFAULT_CONFIGURATION_ATTRIBUTES = table.freeze({
 	"VirtualMass",
 	"EffectivePlayerMass",
 	"PushFollowVelocityScale",
-	"PushTotalMaxAccelerationDeg",
-	"PushMaxAngularSpeedDeg",
-	"PushReleaseDrag",
 	"MaxAngularSpeedDeg",
 	"ReturnStiffness",
 	"ReturnDamping",
@@ -1883,22 +1880,22 @@ local function computePushContact(
 		contactFactor = 0.62 + 0.38 * depth
 	end
 
-	-- Normal pushes use the current slab plane. While closing, use the fixed doorway
-	-- plane so the tilted leaf cannot misclassify a returning player after they cross.
-	local closing = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer" or leaf.angle * leaf.velocity < 0
-	local directionCF = if closing then leaf.closedCollisionCF else cf
-	local directionLocal = if closing then directionCF:PointToObjectSpace(position) else currentLocal
+	-- Direction is derived from the player's CURRENT side of the CURRENT rotated slab,
+	-- not from a cached prompt direction and not from tangential movement noise. The
+	-- player therefore always drives the leaf AWAY from the side they are standing on.
+	-- This remains correct after prompt opens, partial opens, reversals, and opposite-side
+	-- multiplayer pushes. Movement speed still controls strength; side controls sign.
 	local contactLocal = Vector3.new(
-		math.clamp(directionLocal.X, -half.X, half.X),
-		math.clamp(directionLocal.Y, -half.Y, half.Y),
+		math.clamp(currentLocal.X, -half.X, half.X),
+		math.clamp(currentLocal.Y, -half.Y, half.Y),
 		0
 	)
-	local contactWorld = directionCF:PointToWorldSpace(contactLocal)
+	local contactWorld = cf:PointToWorldSpace(contactLocal)
 	local hingeAxis = leaf.hinge.CFrame.UpVector
 	local radius = contactWorld - leaf.hinge.Position
 	local planarRadius = radius - hingeAxis * radius:Dot(hingeAxis)
-	local sideSign = if directionLocal.Z >= 0 then 1 else -1
-	local normalForce = -directionCF.ZVector * sideSign -- from player side through the slab
+	local sideSign = if currentLocal.Z >= 0 then 1 else -1
+	local normalForce = -cf.ZVector * sideSign -- from player side through the slab
 	local torquePerUnitForce = hingeAxis:Dot(planarRadius:Cross(normalForce))
 	local width = math.max(0.5, leaf.collision.Size.X)
 	local minimumLever = width * (tonumber(setting(leaf.rig, leaf.assembly, "MinimumPushLeverFraction", Config.MinimumPushLeverFraction)) or Config.MinimumPushLeverFraction)
@@ -1906,12 +1903,6 @@ local function computePushContact(
 	if math.abs(torquePerUnitForce) < 1e-4 then
 		-- Extremely close to the hinge: use an explicit normal-force sign fallback.
 		torqueSign = torqueSignFromForce(leaf, contactWorld, normalForce)
-	end
-	local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-	if not closing and math.abs(leaf.angle) >= preserveDirectionAngle and leaf.angle * torqueSign < 0 then
-		-- Crossing the rotated slab changes which local side contains the player's root.
-		-- Keep an already-open door moving outward instead of reversing into the player.
-		torqueSign = signNonZero(leaf.angle)
 	end
 	local signedLever = torqueSign * math.max(math.abs(torquePerUnitForce), minimumLever)
 
@@ -1973,12 +1964,6 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 	local sign = if signedLever >= 0 then 1 else -1
 	local lever = math.abs(signedLever)
 	if firstContact then
-		local reversingClose = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer" or leaf.angle * leaf.velocity < 0
-		if reversingClose and leaf.velocity * sign < 0 then
-			-- Do not make the player fight stored auto-close momentum before the leaf
-			-- responds. The new push starts away from their doorway side immediately.
-			leaf.velocity = 0
-		end
 		-- Tiny acquisition nudge only. Sustained torque does the real work, which keeps
 		-- the door from behaving like an automatic proximity door.
 		local deltaOmega = (effectivePlayerMass * normalSpeed * lever / inertia) * impulseScale * contactFactor
@@ -2121,11 +2106,7 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 		leaf.lastPushTime = now
 		leaf.holdUntil = 0
 		leaf.closeSoundArmed = true
-		-- Several high-frequency contact paths can contribute during the same step.
-		-- Cap their combined acceleration so contact pressure builds the swing instead
-		-- of turning the first touch into a full-open launch.
-		local totalMaxAccel = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "PushTotalMaxAccelerationDeg", Config.PushTotalMaxAccelerationDeg)) or Config.PushTotalMaxAccelerationDeg)
-		leaf.velocity += clampAbs(totalAngularAccel, totalMaxAccel) * dt
+		leaf.velocity += totalAngularAccel * dt
 		setActive(leaf)
 	end
 	return effectiveDrive
@@ -2443,13 +2424,11 @@ local function integrateLeaf(leaf: LeafState, dt: number)
 	local kickMotion = leaf.mode == "KickedOpen" and now < leaf.kickBoostUntil
 	local breachMotion = kickMotion and leaf.breached
 	local externalMotion = leaf.mode == "ExternalOpening" or leaf.mode == "ExternalClosing" or leaf.mode == "ExternalLockClosing"
-	local pushedMotion = leaf.mode == "Pushed"
-	local maxAngularName = if breachMotion then "BreachMaxAngularSpeedDeg" elseif kickMotion then "KickMaxAngularSpeedDeg" elseif externalMotion then "ExternalCommandMaxAngularSpeedDeg" elseif pushedMotion then "PushMaxAngularSpeedDeg" else "MaxAngularSpeedDeg"
-	local maxAngularDefault = if breachMotion then (Config.BreachMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif kickMotion then (Config.KickMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif externalMotion then Config.ExternalCommandMaxAngularSpeedDeg elseif pushedMotion then Config.PushMaxAngularSpeedDeg else Config.MaxAngularSpeedDeg
+	local maxAngularName = if breachMotion then "BreachMaxAngularSpeedDeg" elseif kickMotion then "KickMaxAngularSpeedDeg" elseif externalMotion then "ExternalCommandMaxAngularSpeedDeg" else "MaxAngularSpeedDeg"
+	local maxAngularDefault = if breachMotion then (Config.BreachMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif kickMotion then (Config.KickMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif externalMotion then Config.ExternalCommandMaxAngularSpeedDeg else Config.MaxAngularSpeedDeg
 	local maxAngular = math.rad(tonumber(setting(leaf.rig, leaf.assembly, maxAngularName, maxAngularDefault)) or maxAngularDefault)
-	local releasedPush = pushedMotion and not drivenByPlayer
-	local freeDragName = if breachMotion then "BreachFreeDrag" elseif kickMotion then "KickFreeDrag" elseif releasedPush then "PushReleaseDrag" else "FreeDrag"
-	local freeDragDefault = if breachMotion then (Config.BreachFreeDrag or Config.FreeDrag) elseif kickMotion then (Config.KickFreeDrag or Config.FreeDrag) elseif releasedPush then Config.PushReleaseDrag else Config.FreeDrag
+	local freeDragName = if breachMotion then "BreachFreeDrag" elseif kickMotion then "KickFreeDrag" else "FreeDrag"
+	local freeDragDefault = if breachMotion then (Config.BreachFreeDrag or Config.FreeDrag) elseif kickMotion then (Config.KickFreeDrag or Config.FreeDrag) else Config.FreeDrag
 	local freeDrag = tonumber(setting(leaf.rig, leaf.assembly, freeDragName, freeDragDefault)) or freeDragDefault
 	local acceleration = 0
 	local guided = leaf.targetAngle ~= nil
