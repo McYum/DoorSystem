@@ -65,19 +65,25 @@ return table.freeze({
 	VirtualMass = 5.6,
 	EffectivePlayerMass = 11.5,
 	PushImpulseScale = 0.52,
-	ContinuousPushScale = 0.50,
+	ContinuousPushScale = 0.10,
 	PushIntentGrace = 0.24,
 	PushDriveResponse = 14.5,
-	PushDriveRampTime = 0.010,
+	-- Ease sustained contact in instead of reaching full drive on the first simulation step.
+	PushDriveRampTime = 0.16,
 	PushDriveMaxAccelerationDeg = 5200,
+	-- Final caps are applied after all active player drivers have been combined. They
+	-- keep a brief touch from storing enough momentum to fling the leaf fully open.
+	PushTotalMaxAccelerationDeg = 720,
+	PushMaxAngularSpeedDeg = 105,
+	PushReleaseDrag = 4.8,
 	-- While a player is actively pushing, the hinge also tries to match the linear
 	-- speed at the contact radius. This is what makes sprinting open the leaf faster
 	-- instead of merely applying the same weak torque as walking.
 	PushFollowVelocityScale = 0.72,
 	PushFollowVelocityResponse = 15.0,
-	PushFollowMinAngularSpeedDeg = 105,
-	PushFollowMaxAngularSpeedDeg = 470,
-	PushFollowMaxAccelerationDeg = 4400,
+	PushFollowMinAngularSpeedDeg = 0,
+	PushFollowMaxAngularSpeedDeg = 105,
+	PushFollowMaxAccelerationDeg = 700,
 	-- Preserve the approach speed for a fraction of a second after the avatar hits the
 	-- solid slab. Otherwise Roblox collision can zero AssemblyLinearVelocity and make
 	-- sprinting paradoxically push LESS than walking.
@@ -111,7 +117,7 @@ return table.freeze({
 	-- not feel like an anchored wall.
 	StrongContactSurfaceGap = 1.48,
 	PreContactInitialPushMaxAngularSpeedDeg = 6,
-	InitialPushMaxAngularSpeedDeg = 36,
+	InitialPushMaxAngularSpeedDeg = 12,
 	MaxAngularSpeedDeg = 320,
 	FreeDrag = 0.95,
 	LimitBounce = 0.16,

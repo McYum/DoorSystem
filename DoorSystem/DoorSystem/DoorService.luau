@@ -1613,6 +1613,9 @@ local DEFAULT_CONFIGURATION_ATTRIBUTES = table.freeze({
 	"VirtualMass",
 	"EffectivePlayerMass",
 	"PushFollowVelocityScale",
+	"PushTotalMaxAccelerationDeg",
+	"PushMaxAngularSpeedDeg",
+	"PushReleaseDrag",
 	"MaxAngularSpeedDeg",
 	"ReturnStiffness",
 	"ReturnDamping",
@@ -2106,7 +2109,11 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 		leaf.lastPushTime = now
 		leaf.holdUntil = 0
 		leaf.closeSoundArmed = true
-		leaf.velocity += totalAngularAccel * dt
+		-- Several high-frequency contact paths can contribute during the same step.
+		-- Cap their combined acceleration so contact pressure builds the swing instead
+		-- of turning the first touch into a full-open launch.
+		local totalMaxAccel = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "PushTotalMaxAccelerationDeg", Config.PushTotalMaxAccelerationDeg)) or Config.PushTotalMaxAccelerationDeg)
+		leaf.velocity += clampAbs(totalAngularAccel, totalMaxAccel) * dt
 		setActive(leaf)
 	end
 	return effectiveDrive
@@ -2424,11 +2431,13 @@ local function integrateLeaf(leaf: LeafState, dt: number)
 	local kickMotion = leaf.mode == "KickedOpen" and now < leaf.kickBoostUntil
 	local breachMotion = kickMotion and leaf.breached
 	local externalMotion = leaf.mode == "ExternalOpening" or leaf.mode == "ExternalClosing" or leaf.mode == "ExternalLockClosing"
-	local maxAngularName = if breachMotion then "BreachMaxAngularSpeedDeg" elseif kickMotion then "KickMaxAngularSpeedDeg" elseif externalMotion then "ExternalCommandMaxAngularSpeedDeg" else "MaxAngularSpeedDeg"
-	local maxAngularDefault = if breachMotion then (Config.BreachMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif kickMotion then (Config.KickMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif externalMotion then Config.ExternalCommandMaxAngularSpeedDeg else Config.MaxAngularSpeedDeg
+	local pushedMotion = leaf.mode == "Pushed"
+	local maxAngularName = if breachMotion then "BreachMaxAngularSpeedDeg" elseif kickMotion then "KickMaxAngularSpeedDeg" elseif externalMotion then "ExternalCommandMaxAngularSpeedDeg" elseif pushedMotion then "PushMaxAngularSpeedDeg" else "MaxAngularSpeedDeg"
+	local maxAngularDefault = if breachMotion then (Config.BreachMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif kickMotion then (Config.KickMaxAngularSpeedDeg or Config.MaxAngularSpeedDeg) elseif externalMotion then Config.ExternalCommandMaxAngularSpeedDeg elseif pushedMotion then Config.PushMaxAngularSpeedDeg else Config.MaxAngularSpeedDeg
 	local maxAngular = math.rad(tonumber(setting(leaf.rig, leaf.assembly, maxAngularName, maxAngularDefault)) or maxAngularDefault)
-	local freeDragName = if breachMotion then "BreachFreeDrag" elseif kickMotion then "KickFreeDrag" else "FreeDrag"
-	local freeDragDefault = if breachMotion then (Config.BreachFreeDrag or Config.FreeDrag) elseif kickMotion then (Config.KickFreeDrag or Config.FreeDrag) else Config.FreeDrag
+	local releasedPush = pushedMotion and not drivenByPlayer
+	local freeDragName = if breachMotion then "BreachFreeDrag" elseif kickMotion then "KickFreeDrag" elseif releasedPush then "PushReleaseDrag" else "FreeDrag"
+	local freeDragDefault = if breachMotion then (Config.BreachFreeDrag or Config.FreeDrag) elseif kickMotion then (Config.KickFreeDrag or Config.FreeDrag) elseif releasedPush then Config.PushReleaseDrag else Config.FreeDrag
 	local freeDrag = tonumber(setting(leaf.rig, leaf.assembly, freeDragName, freeDragDefault)) or freeDragDefault
 	local acceleration = 0
 	local guided = leaf.targetAngle ~= nil
