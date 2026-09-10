@@ -227,9 +227,7 @@ return table.freeze({
 	-- Only the LOCAL pusher gets temporary collision yield, and only while their
 	-- current movement is driving the door away from their current side. Other players
 	-- keep their own solid local proxy, while the server collider remains authoritative.
-	-- Keep the local mirror solid while pushing. It already follows the rendered hinge,
-	-- so yielding it would let the avatar ghost through before the door opens far enough.
-	LocalPushCollisionYield = false,
+	LocalPushCollisionYield = true,
 	LocalPushCollisionYieldTime = 0.16,
 	LocalPushYieldMinPredictionDeg = 2.5,
 	LocalPushYieldMinAngularSpeedDeg = 28,
