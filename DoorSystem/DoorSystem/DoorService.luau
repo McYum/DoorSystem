@@ -69,6 +69,9 @@ if not snapshotFunction then
 end
 
 local function attr(inst: Instance, name: string, fallback: any): any
+	if inst:IsA("Model") then
+		return DoorAccess.GetSetting(inst, nil, name, fallback)
+	end
 	local value = inst:GetAttribute(name)
 	if value ~= nil then
 		return value
@@ -77,15 +80,7 @@ local function attr(inst: Instance, name: string, fallback: any): any
 end
 
 local function setting(leafRig: Model, assembly: Model, name: string, fallback: any): any
-	local leafValue = leafRig:GetAttribute(name)
-	if leafValue ~= nil then
-		return leafValue
-	end
-	local assemblyValue = assembly:GetAttribute(name)
-	if assemblyValue ~= nil then
-		return assemblyValue
-	end
-	return fallback
+	return DoorAccess.GetSetting(assembly, leafRig, name, fallback)
 end
 
 local function clampAbs(value: number, maxAbs: number): number
@@ -180,7 +175,7 @@ export type AssemblyState = {
 	pendingLock: boolean,
 	registered: boolean,
 	attributeConnections: {RBXScriptConnection},
-	lastSystemAttributes: {[string]: any},
+	lastPublishedAttributes: {[string]: any},
 	stableClosed: boolean,
 	stableOpen: boolean,
 	targetState: string,
@@ -650,14 +645,6 @@ local function makePrompt(leaf: LeafState): ProximityPrompt?
 		return nil
 	end
 
-	local existing = leaf.collision:FindFirstChild("DoorPrompt")
-	if existing and existing:IsA("ProximityPrompt") then
-		if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
-			existing.Style = Enum.ProximityPromptStyle.Custom
-		end
-		return existing
-	end
-
 	local attachment = leaf.collision:FindFirstChild("PromptAttachment")
 	if not attachment or not attachment:IsA("Attachment") then
 		attachment = Instance.new("Attachment")
@@ -671,6 +658,13 @@ local function makePrompt(leaf: LeafState): ProximityPrompt?
 			0
 		)
 		attachment.Parent = leaf.collision
+	end
+	local existing = attachment:FindFirstChild("DoorPrompt")
+	if existing and existing:IsA("ProximityPrompt") then
+		if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+			existing.Style = Enum.ProximityPromptStyle.Custom
+		end
+		return existing
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
@@ -700,6 +694,13 @@ local function makeLockPrompt(leaf: LeafState): ProximityPrompt?
 	if not attachment or not attachment:IsA("Attachment") then
 		return nil
 	end
+	local existing = attachment:FindFirstChild("LockPrompt")
+	if existing and existing:IsA("ProximityPrompt") then
+		if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+			existing.Style = Enum.ProximityPromptStyle.Custom
+		end
+		return existing
+	end
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "LockPrompt"
@@ -724,6 +725,13 @@ local function makeKickPrompt(leaf: LeafState): ProximityPrompt?
 	local attachment = leaf.collision:FindFirstChild("PromptAttachment")
 	if not attachment or not attachment:IsA("Attachment") then
 		return nil
+	end
+	local existing = attachment:FindFirstChild("KickPrompt")
+	if existing and existing:IsA("ProximityPrompt") then
+		if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+			existing.Style = Enum.ProximityPromptStyle.Custom
+		end
+		return existing
 	end
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "KickPrompt"
@@ -1429,17 +1437,13 @@ local function writeAssemblyAttribute(state: AssemblyState, name: string, value:
 	if state.model:GetAttribute(name) == value then
 		return
 	end
-	state.lastSystemAttributes[name] = value
+	state.lastPublishedAttributes[name] = value
 	state.model:SetAttribute(name, value)
 end
 
 local function consumeSystemAttributeChange(state: AssemblyState, name: string): boolean
-	local expected = state.lastSystemAttributes[name]
-	if expected ~= nil and state.model:GetAttribute(name) == expected then
-		state.lastSystemAttributes[name] = nil
-		return true
-	end
-	return false
+	local published = state.lastPublishedAttributes[name]
+	return published ~= nil and state.model:GetAttribute(name) == published
 end
 
 local function assemblyActuallyOpen(state: AssemblyState): boolean
@@ -1632,12 +1636,21 @@ local DEFAULT_CONFIGURATION_ATTRIBUTES = table.freeze({
 	"PromptHoldOpenTime",
 	"PromptOpenAngleDeg",
 	"PromptOpenMode",
+	"PromptStackSpacing",
 	"MaxAngleDeg",
 	"OpenSign",
 	"PushEnabled",
 	"VirtualMass",
 	"EffectivePlayerMass",
 	"PushFollowVelocityScale",
+	"SprintPushEnabled",
+	"SprintPushMinSpeed",
+	"SprintPushClosedAngleDeg",
+	"SprintPushMinAngularSpeedDeg",
+	"SprintPushMaxAngularSpeedDeg",
+	"SprintPushBoostDuration",
+	"SprintPushPlaysImpactSound",
+	"SprintPushAddsKickShake",
 	"MaxAngularSpeedDeg",
 	"ReturnStiffness",
 	"ReturnDamping",
@@ -1651,6 +1664,12 @@ local DEFAULT_CONFIGURATION_ATTRIBUTES = table.freeze({
 	"LockedHandleJiggleDelay",
 	"LockPromptEnabled",
 	"AllowPlayerLocking",
+	"LockType",
+	"LockSide",
+	"RequiredKeyId",
+	"RequiredItemName",
+	"RequiredItemCategory",
+	"OpenRequiresItem",
 	"LockPromptDistance",
 	"KickPromptEnabled",
 	"KickOnlyWhenLocked",
@@ -1695,7 +1714,7 @@ local function publishDefaultConfigurationAttributes(assembly: Model)
 		return
 	end
 	for _, name in DEFAULT_CONFIGURATION_ATTRIBUTES do
-		if assembly:GetAttribute(name) == nil then
+		if assembly:GetAttribute(name) == nil and DoorAccess.GetSetting(assembly, nil, name, nil) == nil then
 			local value = (Config :: any)[name]
 			if value ~= nil then
 				assembly:SetAttribute(name, value)
@@ -1762,7 +1781,7 @@ function DoorService.Register(assembly: Model): AssemblyState?
 		pendingLock = false,
 		registered = true,
 		attributeConnections = {},
-		lastSystemAttributes = {},
+		lastPublishedAttributes = {},
 		stableClosed = true,
 		stableOpen = false,
 		targetState = if attr(assembly, "Locked", false) == true then "Locked" else "Closed",
@@ -1994,7 +2013,36 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 		-- momentum so the door begins responding away from the player immediately.
 		leaf.velocity = 0
 	end
-	if firstContact then
+	local currentCF = getCollisionPose(leaf, leaf.angle)
+	local moveIntent = sample.moveDirection * Vector3.new(1, 0, 1)
+	local intendedNormalSpeed = if moveIntent.Magnitude > 0.05
+		then sample.humanoid.WalkSpeed * math.abs(currentCF.LookVector:Dot(moveIntent.Unit))
+		else 0
+	local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
+	local characterValues = sample.player.Character and sample.player.Character:FindFirstChild("Values")
+	local sprintFolder = characterValues and characterValues:FindFirstChild("SprintHandler")
+	local sprintValue = sprintFolder and sprintFolder:FindFirstChild("Sprinting")
+	local isSprinting = sprintValue ~= nil and sprintValue:IsA("BoolValue") and sprintValue.Value == true
+	local approachSpeed = math.max(normalSpeed, intendedNormalSpeed, if isSprinting then sample.humanoid.WalkSpeed else 0)
+	local sprintClosedAngle = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "SprintPushClosedAngleDeg", Config.SprintPushClosedAngleDeg)) or Config.SprintPushClosedAngleDeg)
+	local sprintLaunch = firstContact
+		and setting(leaf.rig, leaf.assembly, "SprintPushEnabled", Config.SprintPushEnabled) ~= false
+		and (isSprinting or approachSpeed >= sprintMinSpeed)
+		and math.abs(leaf.angle) <= sprintClosedAngle
+	if sprintLaunch then
+		local minLaunch = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinAngularSpeedDeg", Config.SprintPushMinAngularSpeedDeg)) or Config.SprintPushMinAngularSpeedDeg
+		local maxLaunch = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMaxAngularSpeedDeg", Config.SprintPushMaxAngularSpeedDeg)) or Config.SprintPushMaxAngularSpeedDeg
+		local speedScale = math.clamp(approachSpeed / math.max(sprintMinSpeed, 0.01), 1, 1.35)
+		local launchedSpeed = math.min(maxLaunch, math.max(math.deg(leaf.velocity) * sign, minLaunch * speedScale))
+		leaf.velocity = sign * math.rad(launchedSpeed)
+		leaf.kickBoostUntil = now + (tonumber(setting(leaf.rig, leaf.assembly, "SprintPushBoostDuration", Config.SprintPushBoostDuration)) or Config.SprintPushBoostDuration)
+		if setting(leaf.rig, leaf.assembly, "SprintPushPlaysImpactSound", Config.SprintPushPlaysImpactSound) ~= false then
+			playSoundFallback(leaf, Config.SoundNames.KickAttempt, Config.SoundNames.Kick)
+		end
+		if setting(leaf.rig, leaf.assembly, "SprintPushAddsKickShake", Config.SprintPushAddsKickShake) ~= false then
+			broadcastAction(leaf, "Kick", {side = playerSideForLeaf(leaf, sample.player), sign = sign, locked = false, breaching = false})
+		end
+	elseif firstContact then
 		-- Tiny acquisition nudge only. Sustained torque does the real work, which keeps
 		-- the door from behaving like an automatic proximity door.
 		local deltaOmega = (effectivePlayerMass * normalSpeed * lever / inertia) * impulseScale * contactFactor
@@ -3012,7 +3060,6 @@ function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
 		sign = sign,
 		locked = wasLocked,
 		breaching = breachingNow,
-		particles = tonumber(setting(leaf.rig, leaf.assembly, "KickParticleCount", Config.KickParticleCount)) or Config.KickParticleCount,
 	})
 
 	-- Failed locked kicks NEVER accumulate real hinge motion. The visible recoil is
@@ -3096,7 +3143,6 @@ function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
 	broadcastAction(leaf, "Breach", {
 		side = side,
 		sign = sign,
-		particles = tonumber(setting(leaf.rig, leaf.assembly, "BreachParticleCount", Config.BreachParticleCount)) or Config.BreachParticleCount,
 	})
 
 	-- Only after the latch is actually broken can a locked door release and swing.
@@ -3381,9 +3427,14 @@ function DoorService.Start()
 		end
 	end
 	registerTaggedDoors()
-	-- Authored CollectionService tags can become queryable just after server scripts
-	-- start. Rescan once after data-model initialization; Register is idempotent.
-	task.delay(1, registerTaggedDoors)
+	-- Authored tags and their leaf hierarchy can arrive in separate Studio-sync
+	-- passes. A cheap idempotent rescan also recovers from live module replacement.
+	task.spawn(function()
+		while started do
+			task.wait(2)
+			registerTaggedDoors()
+		end
+	end)
 	CollectionService:GetInstanceAddedSignal(Config.Tag):Connect(function(inst)
 		if inst:IsA("Model") then
 			DoorService.Register(inst)

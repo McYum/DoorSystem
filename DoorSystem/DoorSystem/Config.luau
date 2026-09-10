@@ -4,8 +4,8 @@
 -- All values can be overridden with Attributes on the top-level assembly or LeafRig.
 
 return table.freeze({
-	Version = "7.8.0",
-	VersionName = "DoorSystem v7.8",
+	Version = "7.9.0",
+	VersionName = "DoorSystem v7.9",
 	Tag = "DoorSystemDoor",
 	RemotesFolderName = "DoorSystemRemotes",
 
@@ -52,7 +52,7 @@ return table.freeze({
 	RequiredItemCategory = "DoorKey",
 	OpenRequiresItem = false,
 	UseRequirementChecker = true,
-	HideUnavailablePrompts = false,
+	HideUnavailablePrompts = true,
 	AutoClose = true,
 	AutoCloseDelay = 0.85,
 	-- Ignore tiny hinge vibrations when deciding whether an automatic return is needed.
@@ -90,6 +90,16 @@ return table.freeze({
 	PushFollowMinAngularSpeedDeg = 105,
 	PushFollowMaxAngularSpeedDeg = 470,
 	PushFollowMaxAccelerationDeg = 4400,
+	-- Running directly into an unlocked leaf carries momentum through as a kick-like
+	-- opening launch. This is motion/audio only and never damages the latch.
+	SprintPushEnabled = true,
+	SprintPushMinSpeed = 20,
+	SprintPushClosedAngleDeg = 8,
+	SprintPushMinAngularSpeedDeg = 330,
+	SprintPushMaxAngularSpeedDeg = 470,
+	SprintPushBoostDuration = 0.45,
+	SprintPushPlaysImpactSound = true,
+	SprintPushAddsKickShake = true,
 	-- Preserve the approach speed for a fraction of a second after the avatar hits the
 	-- solid slab. Otherwise Roblox collision can zero AssemblyLinearVelocity and make
 	-- sprinting paradoxically push LESS than walking.
@@ -122,8 +132,8 @@ return table.freeze({
 	-- at the slab, allow a much stronger initial yield so the solid collision does
 	-- not feel like an anchored wall.
 	StrongContactSurfaceGap = 1.48,
-	PreContactInitialPushMaxAngularSpeedDeg = 6,
-	InitialPushMaxAngularSpeedDeg = 36,
+	PreContactInitialPushMaxAngularSpeedDeg = 16,
+	InitialPushMaxAngularSpeedDeg = 105,
 	MaxAngularSpeedDeg = 320,
 	FreeDrag = 0.95,
 	LimitBounce = 0.16,
@@ -239,6 +249,7 @@ return table.freeze({
 	-- keep their own solid local proxy, while the server collider remains authoritative.
 	LocalPushCollisionYield = true,
 	LocalPushCollisionYieldTime = 0.16,
+	LocalPushYieldMinNormalSpeed = 6,
 	LocalPushYieldMinPredictionDeg = 2.5,
 	LocalPushYieldMinAngularSpeedDeg = 28,
 	LocalPushYieldClearance = 0.72,
@@ -279,11 +290,12 @@ return table.freeze({
 	PromptValidationPadding = 2.25,
 	PromptActionText = "Open",
 	PromptCloseText = "Close",
-	PromptLockedText = "Locked",
+	PromptLockedText = "Try Door",
 	PromptUnlockText = "Unlock & Open",
 	PromptObjectText = "Door",
 	PromptDistance = 7,
 	PromptHoldDuration = 0,
+	PromptStackSpacing = 58,
 	LockPromptKey = Enum.KeyCode.F,
 	LockPromptDistance = 6,
 	LockPromptHoldDuration = 0.20,
@@ -345,12 +357,6 @@ return table.freeze({
 	LockedKickShakeDamping = 0.08,
 	-- Successful breach already has real hinge motion; keep its cosmetic layer subtle.
 	BreachShakeDeg = 7.0,
-
-	-- Optional authored impact particles. Put a ParticleEmitter named `KickDust`
-	-- under KickRoot or LatchRoot in Leaf. The client clone emits it on each kick.
-	KickParticleEmitterName = "KickDust",
-	KickParticleCount = 12,
-	BreachParticleCount = 28,
 
 	-- State-driven motion audio. The server chooses the exact random variant once and
 	-- clients play that same template at the smoothly rendered leaf. A sound category can

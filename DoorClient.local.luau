@@ -12,7 +12,7 @@ local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
-local DOOR_SYSTEM_VERSION = "7.8.0"
+local DOOR_SYSTEM_VERSION = "7.9.0"
 -- Client configuration is inlined so DoorClient is self-contained.
 local Config = {
 	Version = DOOR_SYSTEM_VERSION,
@@ -52,6 +52,7 @@ local Config = {
 	-- Interaction presentation
 	LocalPromptProxy = true,
 	CustomPromptStyle = true,
+	PromptStackSpacing = 58,
 	LocalCollisionMirror = true,
 	LocalPushScanHz = 60,
 	PushSendInterval = 0.045,
@@ -63,6 +64,7 @@ local Config = {
 	PushLeadExtraGap = 0.52,
 	LocalPushCollisionYield = true,
 	LocalPushCollisionYieldTime = 0.10,
+	LocalPushYieldMinNormalSpeed = 6,
 	LocalPushYieldMinPredictionDeg = 2.5,
 	LocalPushYieldMinAngularSpeedDeg = 28,
 	LocalPushYieldClearance = 0.58,
@@ -79,9 +81,6 @@ local Config = {
 	LockedKickShakeFrequency = 27.0,
 	LockedKickShakeDamping = 0.08,
 	BreachShakeDeg = 7.0,
-	KickParticleEmitterName = "KickDust",
-	KickParticleCount = 12,
-	BreachParticleCount = 28,
 }
 local UISpr = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Hud"):WaitForChild("UISpr"))
 local DoorAccess: any = nil
@@ -180,6 +179,7 @@ export type LocalPushState = {
 	surfaceGap: number,
 }
 local localPushStates: {[Model]: LocalPushState} = {}
+local promptBaseOffsets: {[ProximityPrompt]: Vector2} = setmetatable({}, {__mode = "k"})
 
 -- Client-only render container. Nothing in here replicates back to the server,
 -- which is intentional: the server owns simulation/collision, clients own smooth visuals.
@@ -193,6 +193,9 @@ renderFolder.Archivable = false
 renderFolder.Parent = workspace
 
 local function setting(rig: Model, assembly: Instance?, name: string, fallback: any): any
+	if DoorAccess and DoorAccess.GetSetting and assembly and assembly:IsA("Model") then
+		return DoorAccess.GetSetting(assembly, rig, name, fallback)
+	end
 	local value = rig:GetAttribute(name)
 	if value ~= nil then return value end
 	if assembly then
@@ -441,19 +444,23 @@ local function disableServerPromptsLocally(rig: Model)
 	end
 end
 
-local function createLocalPrompt(name: string, actionText: string, objectText: string, key: Enum.KeyCode, gamepad: Enum.KeyCode, distance: number, hold: number, attachment: Attachment): ProximityPrompt
-	local prompt = Instance.new("ProximityPrompt")
+local function createLocalPrompt(name: string, actionText: string, objectText: string, key: Enum.KeyCode, gamepad: Enum.KeyCode, distance: number, hold: number, attachment: Attachment, template: ProximityPrompt?): ProximityPrompt
+	local prompt = if template then template:Clone() else Instance.new("ProximityPrompt")
 	prompt.Name = name
-	prompt.ActionText = actionText
-	prompt.ObjectText = objectText
-	prompt.KeyboardKeyCode = key
-	prompt.GamepadKeyCode = gamepad
-	prompt.MaxActivationDistance = distance
-	prompt.HoldDuration = hold
-	prompt.RequiresLineOfSight = false
-	if Config.CustomPromptStyle then
-		prompt.Style = Enum.ProximityPromptStyle.Custom
+	if not template then
+		prompt.ActionText = actionText
+		prompt.ObjectText = objectText
+		prompt.KeyboardKeyCode = key
+		prompt.GamepadKeyCode = gamepad
+		prompt.MaxActivationDistance = distance
+		prompt.HoldDuration = hold
+		prompt.RequiresLineOfSight = false
+		if Config.CustomPromptStyle then
+			prompt.Style = Enum.ProximityPromptStyle.Custom
+		end
 	end
+	prompt.Enabled = true
+	promptBaseOffsets[prompt] = prompt.UIOffset
 	prompt.Parent = attachment
 	return prompt
 end
@@ -548,6 +555,12 @@ local function ensureLocalPromptProxy(leaf: ClientLeaf)
 		)
 	end
 	leaf.promptAnchor = anchor
+	local doorTemplate = if authored and authored:IsA("Attachment") then authored:FindFirstChild("DoorPrompt") else nil
+	local lockTemplate = if authored and authored:IsA("Attachment") then authored:FindFirstChild("LockPrompt") else nil
+	local kickTemplate = if authored and authored:IsA("Attachment") then authored:FindFirstChild("KickPrompt") else nil
+	if not doorTemplate or not doorTemplate:IsA("ProximityPrompt") then doorTemplate = nil end
+	if not lockTemplate or not lockTemplate:IsA("ProximityPrompt") then lockTemplate = nil end
+	if not kickTemplate or not kickTemplate:IsA("ProximityPrompt") then kickTemplate = nil end
 
 	local objectText = tostring(setting(leaf.rig, assembly, "PromptObjectText", "Door"))
 	if setting(leaf.rig, assembly, "PromptEnabled", true) ~= false then
@@ -559,7 +572,8 @@ local function ensureLocalPromptProxy(leaf: ClientLeaf)
 			Enum.KeyCode.ButtonX,
 			tonumber(setting(leaf.rig, assembly, "PromptDistance", 7)) or 7,
 			tonumber(setting(leaf.rig, assembly, "PromptHoldDuration", 0)) or 0,
-			attachment
+			attachment,
+			doorTemplate
 		)
 		prompt.Triggered:Connect(function()
 			local currentAssembly = findAssembly(leaf.rig)
@@ -585,7 +599,8 @@ local function ensureLocalPromptProxy(leaf: ClientLeaf)
 			Enum.KeyCode.ButtonY,
 			tonumber(setting(leaf.rig, assembly, "LockPromptDistance", 6)) or 6,
 			tonumber(setting(leaf.rig, assembly, "LockPromptHoldDuration", 0.20)) or 0.20,
-			attachment
+			attachment,
+			lockTemplate
 		)
 		prompt.Triggered:Connect(function()
 			interactEvent:FireServer(leaf.rig, "Lock")
@@ -604,7 +619,8 @@ local function ensureLocalPromptProxy(leaf: ClientLeaf)
 			Enum.KeyCode.ButtonB,
 			tonumber(setting(leaf.rig, assembly, "KickPromptDistance", 5.5)) or 5.5,
 			tonumber(setting(leaf.rig, assembly, "KickPromptHoldDuration", 0.24)) or 0.24,
-			attachment
+			attachment,
+			kickTemplate
 		)
 		prompt.Triggered:Connect(function()
 			interactEvent:FireServer(leaf.rig, "Kick")
@@ -635,13 +651,13 @@ local function updateLocalPromptState(leaf: ClientLeaf)
 			local looksOpen = leafOrAssemblyLooksOpen(leaf, assembly)
 			local action = if looksOpen then "Close" else "Open"
 			local allowed = canPlayerAccess(leaf, assembly, action)
-			local hideUnavailable = setting(leaf.rig, assembly, "HideUnavailablePrompts", false) == true
+			-- Trying the handle is always available. A locked door provides its normal
+			-- rattle/handle feedback; only the separate lock control is requirement-gated.
 			leaf.doorPrompt.Enabled = setting(leaf.rig, assembly, "PromptEnabled", true) ~= false
-				and (allowed or not hideUnavailable)
 			if locked then
 				leaf.doorPrompt.ActionText = if allowed
 					then tostring(setting(leaf.rig, assembly, "PromptUnlockText", "Unlock & Open"))
-					else tostring(setting(leaf.rig, assembly, "PromptLockedText", "Locked"))
+					else tostring(setting(leaf.rig, assembly, "PromptLockedText", "Try Door"))
 			elseif looksOpen then
 				leaf.doorPrompt.ActionText = tostring(setting(leaf.rig, assembly, "PromptCloseText", "Close"))
 			else
@@ -669,6 +685,25 @@ local function updateLocalPromptState(leaf: ClientLeaf)
 		leaf.kickPrompt.ActionText = if locked
 			then tostring(setting(leaf.rig, assembly, "KickPromptLockedText", "Kick In"))
 			else tostring(setting(leaf.rig, assembly, "KickPromptUnlockedText", "Kick"))
+	end
+
+	-- Center whichever prompts are currently valid so multiple actions never render
+	-- on top of each other and a single action stays centered.
+	local visiblePrompts = {}
+	for _, prompt in {leaf.doorPrompt, leaf.lockPrompt, leaf.kickPrompt} do
+		if prompt and prompt.Enabled then
+			table.insert(visiblePrompts, prompt)
+		end
+	end
+	local spacing = tonumber(setting(leaf.rig, assembly, "PromptStackSpacing", Config.PromptStackSpacing))
+		or Config.PromptStackSpacing
+	local center = (#visiblePrompts + 1) / 2
+	for index, prompt in visiblePrompts do
+		local desiredOffset = (promptBaseOffsets[prompt] or Vector2.zero)
+			+ Vector2.new(0, (index - center) * spacing)
+		if prompt.UIOffset ~= desiredOffset then
+			prompt.UIOffset = desiredOffset
+		end
 	end
 end
 
@@ -720,44 +755,6 @@ local function animateHandle(leaf: ClientLeaf, side: string, locked: boolean)
 			UISpr.target(motor, damping, frequency, {Transform = CFrame.identity})
 		end
 	end)
-end
-
-local function emitKickParticles(leaf: ClientLeaf, count: number)
-	local renderModel = ensureRenderModel(leaf)
-	if not renderModel then return end
-	local emitterName = tostring(Config.KickParticleEmitterName or "KickDust")
-	for _, descendant in renderModel:GetDescendants() do
-		if descendant:IsA("ParticleEmitter") and descendant.Name == emitterName then
-			local parent = descendant.Parent
-			local worldCF: CFrame? = nil
-			if parent and parent:IsA("Attachment") then
-				worldCF = parent.WorldCFrame
-			elseif parent and parent:IsA("BasePart") then
-				worldCF = parent.CFrame
-			end
-			if worldCF then
-				-- Detach the burst from the render leaf so it survives a same-frame breach
-				-- that destroys the client render clone and hands the real leaf to physics.
-				local holder = Instance.new("Part")
-				holder.Name = "_DoorSystemKickFX"
-				holder.Size = Vector3.new(0.05, 0.05, 0.05)
-				holder.CFrame = worldCF
-				holder.Transparency = 1
-				holder.Anchored = true
-				holder.CanCollide = false
-				holder.CanTouch = false
-				holder.CanQuery = false
-				holder.Parent = workspace
-				local attachment = Instance.new("Attachment")
-				attachment.Parent = holder
-				local emitter = descendant:Clone()
-				emitter.Enabled = false
-				emitter.Parent = attachment
-				emitter:Emit(math.max(1, math.floor(count)))
-				Debris:AddItem(holder, 2.5)
-			end
-		end
-	end
 end
 
 local function collectLocalSoundCandidates(container: Instance?, name: string): {Sound}
@@ -1016,13 +1013,11 @@ actionEvent.OnClientEvent:Connect(function(payload)
 			if data.breaching ~= true then
 				addKickShake(leaf, sign, false, data.locked == true)
 			end
-			emitKickParticles(leaf, tonumber(data.particles) or Config.KickParticleCount or 12)
 		end
 	elseif kind == "Breach" then
 		if cosmeticActionRelevant(leaf) then
 			local sign = tonumber(data.sign) or 1
 			addKickShake(leaf, sign, true, false)
-			emitKickParticles(leaf, tonumber(data.particles) or Config.BreachParticleCount or 28)
 		end
 	elseif kind == "Break" then
 		leaf.broken = true
@@ -1295,23 +1290,15 @@ local function scanLocalPushIntent(now: number)
 			local torque = hingeAxis:Dot(radius:Cross(normalForce))
 			local openSign = if torque < 0 then -1 else 1
 
-			-- At the jamb, do not even arm a yield until authoritative motion leaves the
-			-- seat. At wider angles this records intent, but renderLeaf still waits for a
-			-- server-acknowledged Pushed state before actually removing collision.
-			local closedSolidAngle = math.rad(Config.ClosedCollisionSolidAngleDeg or 6.0)
-			local inClosedSolidZone = math.abs(leaf.snapshotAngle) <= closedSolidAngle
-			local authoritativeOpeningAway = leaf.snapshotVelocity * openSign >= math.rad(Config.LocalPushYieldMinAngularSpeedDeg or 28)
-			if not inClosedSolidZone or authoritativeOpeningAway then
-				localPushStates[leaf.rig] = {
-					expiresAt = now + (Config.LocalPushCollisionYieldTime or 0.16),
-					sign = openSign,
-					normalSpeed = normalSpeed,
-					surfaceGap = surfaceGap,
-				}
-			else
-				localPushStates[leaf.rig] = nil
-				leaf.localCollisionYieldUntil = 0
-			end
+			-- Record this geometrically validated contact immediately. renderLeaf can let
+			-- the local avatar through at body-contact range while the server independently
+			-- validates and starts the authoritative hinge on the same frame.
+			localPushStates[leaf.rig] = {
+				expiresAt = now + (Config.LocalPushCollisionYieldTime or 0.16),
+				sign = openSign,
+				normalSpeed = normalSpeed,
+				surfaceGap = surfaceGap,
+			}
 
 			local last = pushSentAt[leaf.rig] or -math.huge
 			if now - last >= (Config.PushSendInterval or 0.045) then
@@ -1327,11 +1314,20 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	local renderModel = ensureRenderModel(leaf)
 	if not renderModel then return end
 	local assembly = findAssembly(leaf.rig)
+	local localNow = os.clock()
+	local pendingPush = localPushStates[leaf.rig]
+	local lockedForPush = assembly and assembly:GetAttribute("Locked") == true
+	local localContactYield = Config.LocalPushCollisionYield == true
+		and not lockedForPush
+		and pendingPush ~= nil
+		and localNow <= pendingPush.expiresAt
+		and pendingPush.normalSpeed >= (tonumber(setting(leaf.rig, assembly, "LocalPushYieldMinNormalSpeed", Config.LocalPushYieldMinNormalSpeed)) or Config.LocalPushYieldMinNormalSpeed)
+		and pendingPush.surfaceGap <= (tonumber(setting(leaf.rig, assembly, "PushContactSurfaceGap", Config.PushContactSurfaceGap)) or Config.PushContactSurfaceGap)
 	local dormantAngleEps = math.rad(Config.ClientDormantAngleEpsilonDeg or 0.025)
 	local dormantVelocityEps = math.rad(Config.ClientDormantVelocityEpsilonDeg or 0.20)
 	local dormantStable = isStableCollisionMode(leaf.mode)
 	local dormantClosedSolidAngle = math.rad(Config.ClosedCollisionSolidAngleDeg or 6.0)
-	if dormantStable and math.abs(leaf.snapshotAngle) <= dormantClosedSolidAngle and not leaf.broken then
+	if dormantStable and not localContactYield and math.abs(leaf.snapshotAngle) <= dormantClosedSolidAngle and not leaf.broken then
 		-- Repair collision BEFORE the dormant fast-path. A previous push-yield must never
 		-- survive into a visually/authoritatively closed door, even for a single frame.
 		leaf.localCollisionYieldUntil = 0
@@ -1369,7 +1365,7 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 		and not openingAwayFromSeat
 		and leaf.mode ~= "PromptOpening"
 		and leaf.mode ~= "ExternalOpening"
-	if closedSeatSolid then
+	if closedSeatSolid and not localContactYield then
 		stableCollisionState = true
 		leaf.localCollisionYieldUntil = 0
 		localPushStates[leaf.rig] = nil
@@ -1523,17 +1519,14 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 			leaf.localCollisionYieldUntil = 0
 			localPushStates[leaf.rig] = nil
 			pushState = nil
-		elseif stableCollisionState then
+		elseif stableCollisionState and not localContactYield then
 			leaf.localCollisionYieldUntil = 0
 			localPushStates[leaf.rig] = nil
 			pushState = nil
-		elseif Config.LocalPushCollisionYield == true and not locked and pushState and serverNow <= pushState.expiresAt then
-			-- Prediction may show the intended opening before the server has accepted the
-			-- contact. Never remove collision on prediction alone: during auto-close that
-			-- let the player clear the slab, ending the push before the leaf could reverse.
+		elseif Config.LocalPushCollisionYield == true and not locked and pushState and localNow <= pushState.expiresAt then
 			local authoritativeOpeningAway = leaf.mode == "Pushed"
 				and leaf.snapshotVelocity * pushState.sign > math.rad(1)
-			if authoritativeOpeningAway then
+			if localContactYield or authoritativeOpeningAway then
 				shouldYield = true
 				leaf.localCollisionYieldUntil = math.max(leaf.localCollisionYieldUntil, serverNow + (Config.LocalPushCollisionYieldTime or 0.16))
 			end
@@ -1565,6 +1558,16 @@ for _, tagged in CollectionService:GetTagged(Config.Tag) do
 end
 CollectionService:GetInstanceAddedSignal(Config.Tag):Connect(function(inst)
 	if inst:IsA("Model") then task.defer(discoverAssembly, inst) end
+end)
+task.spawn(function()
+	while true do
+		task.wait(2)
+		-- Studio sync may replicate an authored tag before its Leaves hierarchy. The
+		-- normal added signal has already fired by then, so retry idempotently.
+		for _, tagged in CollectionService:GetTagged(Config.Tag) do
+			if tagged:IsA("Model") then discoverAssembly(tagged) end
+		end
+	end
 end)
 
 player.CharacterAdded:Connect(function() task.defer(refreshCharacter) end)

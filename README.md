@@ -16,13 +16,31 @@ Set these attributes on the tagged assembly (or on one leaf rig to override it):
 | `RequiredItemName` | `Door_Key_Demo` | Optional exact item/template name instead of, or in addition to, a key id. |
 | `LockType` | `Side` | No item is required; access is restricted by side. |
 | `LockSide` | `Front` or `Back` | Side allowed to lock/unlock and open a locked door. |
-| `HideUnavailablePrompts` | `true` | Locally hides prompts the current player cannot use. |
+| `HideUnavailablePrompts` | `true` | Hides unavailable secondary controls; the main try/open prompt remains visible. |
 | `OpenRequiresItem` | `true` | Also checks the item while the door is unlocked. |
+| `PromptStackSpacing` | `58` | Vertical spacing between currently available door actions. |
+
+The same flat keys can be returned from a `DoorConfig` ModuleScript directly under
+the assembly or leaf. Attributes take precedence, so a designer can override one
+module value without duplicating the rest. The persistent demos include this module.
+
+For fully authored prompts, put `PromptAttachment` under a leaf's
+`CollisionTemplate`, then add `DoorPrompt`, `LockPrompt`, or `KickPrompt`
+`ProximityPrompt` instances beneath it. Their attachment position, keybinds,
+distance, hold duration, object text, custom `Settings`/`Checker` children, and base
+`UIOffset` are cloned into the smooth client proxy. DoorSystem adds
+`PromptStackSpacing` to those base offsets. The main door prompt remains available
+on a locked door so the player can try its handle; lock/unlock prompts are shown only
+when that player has the required key or is on the permitted side.
 
 Inventory lookup supports the authoritative `Player.Inventory` tree, linked
 `ObjectValue`/Tool entries, and legacy Character/Backpack tools. A `DoorKey` with
 `MasterKey=true` or `DoorKeyId="*"` opens every keyed door. Server scripts may call
 `DoorService.CanPlayerAccess(...)` before custom interactions.
+
+The Studio demo uses authored Tool instances at
+`ServerScriptService.ItemTemplates.DoorKeys.Door_Key_Demo` and
+`StarterPack.Door_Key_Demo`; it does not generate the key from a runtime script.
 
 For old requirement modules, put a ModuleScript named `DoorRequirementChecker` or
 `Checker` under the assembly/leaf (or `Requirements/Checker`). Existing `check` and
@@ -33,5 +51,14 @@ For old requirement modules, put a ModuleScript named `DoorRequirementChecker` o
 
 The melee adapter calls `DoorService.Kick` only for attack configurations with
 `DoorImpact=true`. This reuses the door's own kick/breach durability, sound bank,
-particle emitter, networking, and hinge impulse. Set `MeleeBreachEnabled=false` on an
-assembly to opt that door out.
+networking, and hinge impulse while retaining the melee system's normal impact audio
+and VFX. DoorSystem does not add kick particles. Put a Sound or Folder of Sound
+variants at `Sounds/KickAttempt` on the assembly/leaf to customize each door; the
+Studio demos use the sounds from
+`ReplicatedStorage.Miscs.MeleeSoundEffects.KickImpactSounds.Door`. Set
+`MeleeBreachEnabled=false` on an assembly to opt that door out.
+
+Walking contact now yields the local collision proxy as soon as validated body
+contact is detected. At or above `SprintPushMinSpeed`, an unlocked closed door gets a
+kick-like launch without taking durability damage. All sprint values can be changed
+per door through attributes or `DoorConfig`.

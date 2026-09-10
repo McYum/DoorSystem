@@ -5,6 +5,30 @@ local RunService = game:GetService("RunService")
 
 local DoorAccess = {}
 
+local configCache: {[ModuleScript]: any} = setmetatable({}, {__mode = "k"})
+
+local function configFor(root: Instance?): {[string]: any}?
+	if not root then
+		return nil
+	end
+	local module = root:FindFirstChild("DoorConfig") or root:FindFirstChild("Configuration")
+	if not module or not module:IsA("ModuleScript") then
+		return nil
+	end
+	local cached = configCache[module]
+	if cached ~= nil then
+		return if cached == false then nil else cached
+	end
+	local ok, result = pcall(require, module)
+	if not ok or typeof(result) ~= "table" then
+		configCache[module] = false
+		warn("[DoorAccess] Invalid per-door configuration:", module:GetFullName())
+		return nil
+	end
+	configCache[module] = result
+	return result
+end
+
 local function setting(assembly: Model, leafRig: Model?, names: {string}, fallback: any): any
 	for _, name in names do
 		if leafRig then
@@ -18,7 +42,21 @@ local function setting(assembly: Model, leafRig: Model?, names: {string}, fallba
 			return assemblyValue
 		end
 	end
+	for _, config in {configFor(leafRig), configFor(assembly)} do
+		if config then
+			for _, name in names do
+				local value = config[name]
+				if value ~= nil then
+					return value
+				end
+			end
+		end
+	end
 	return fallback
+end
+
+function DoorAccess.GetSetting(assembly: Model, leafRig: Model?, names: string | {string}, fallback: any): any
+	return setting(assembly, leafRig, if typeof(names) == "string" then {names} else names, fallback)
 end
 
 local function nonEmptyString(value: any): string?
@@ -196,6 +234,18 @@ function DoorAccess.Check(
 	local checkerModule = findChecker(assembly, leafRig)
 	if checkerModule and (legacyCondition == true or setting(assembly, leafRig, {"UseRequirementChecker"}, true) == true) then
 		return runChecker(checkerModule, player, assembly, action)
+	end
+	local hasUnlockRule = lockType == "key"
+		or lockType == "side"
+		or lockType == "sided"
+		or lockType == "inside"
+		or lockType == "outside"
+		or requiredSide ~= nil
+		or keyId ~= nil
+		or itemName ~= nil
+		or openRequiresItem
+	if locked and normalizedAction == "open" and not hasUnlockRule then
+		return false, "Locked"
 	end
 	return true, nil
 end
