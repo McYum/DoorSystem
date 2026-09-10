@@ -1908,7 +1908,8 @@ local function computePushContact(
 		torqueSign = torqueSignFromForce(leaf, contactWorld, normalForce)
 	end
 	local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-	if math.abs(leaf.angle) >= preserveDirectionAngle and leaf.angle * torqueSign < 0 then
+	local openingOrStationary = leaf.angle * leaf.velocity >= 0
+	if openingOrStationary and math.abs(leaf.angle) >= preserveDirectionAngle and leaf.angle * torqueSign < 0 then
 		-- Crossing the rotated slab changes which local side contains the player's root.
 		-- Keep an already-open door moving outward instead of reversing into the player.
 		torqueSign = signNonZero(leaf.angle)

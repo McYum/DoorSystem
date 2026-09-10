@@ -1147,7 +1147,8 @@ local function updateLocalPrediction(leaf: ClientLeaf, dt: number): number
 				local torque = hingeAxis:Dot(radius:Cross(normalForce))
 				local sign = if torque < 0 then -1 else 1
 				local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-				if math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * sign < 0 then
+				local openingOrStationary = leaf.snapshotAngle * leaf.snapshotVelocity >= 0
+				if openingOrStationary and math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * sign < 0 then
 					sign = if leaf.snapshotAngle < 0 then -1 else 1
 				end
 				local closeness = if surfaceGap <= contactGap then 1 else math.clamp(1 - timeToSurface / math.max(maxLead, 1e-3), 0, 1) * 0.45
@@ -1254,7 +1255,8 @@ local function scanLocalPushIntent(now: number)
 			local torque = hingeAxis:Dot(radius:Cross(normalForce))
 			local openSign = if torque < 0 then -1 else 1
 			local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-			if math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * openSign < 0 then
+			local openingOrStationary = leaf.snapshotAngle * leaf.snapshotVelocity >= 0
+			if openingOrStationary and math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * openSign < 0 then
 				openSign = if leaf.snapshotAngle < 0 then -1 else 1
 			end
 

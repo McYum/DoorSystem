@@ -99,8 +99,8 @@ return table.freeze({
 	PushFallbackWalkSpeed = 12.5,
 	PushLeadExtraGap = 0.52,
 	MinimumPushLeverFraction = 0.28,
-	-- Once a leaf is meaningfully open, player contact keeps driving it outward.
-	-- This prevents the contact side from flipping as an avatar crosses the slab.
+	-- Once a leaf is meaningfully open and not closing, contact keeps driving it outward.
+	-- Closing leaves still reverse away from the approaching player.
 	PushPreserveOpenDirectionDeg = 8,
 	PushCollisionYieldTime = 0,
 	PushCollisionYieldMinAccelDeg = 99999,
