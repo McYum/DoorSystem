@@ -1927,6 +1927,7 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 	if not accepted then
 		return false
 	end
+	local interruptingClose = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer"
 
 	local inertia = virtualInertia(leaf)
 	local effectivePlayerMass = tonumber(setting(leaf.rig, leaf.assembly, "EffectivePlayerMass", Config.EffectivePlayerMass)) or Config.EffectivePlayerMass
@@ -1963,6 +1964,11 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 
 	local sign = if signedLever >= 0 then 1 else -1
 	local lever = math.abs(signedLever)
+	if interruptingClose and leaf.velocity * sign < 0 then
+		-- A validated push owns the leaf now. Remove the automatic return's opposing
+		-- momentum so the door begins responding away from the player immediately.
+		leaf.velocity = 0
+	end
 	if firstContact then
 		-- Tiny acquisition nudge only. Sustained torque does the real work, which keeps
 		-- the door from behaving like an automatic proximity door.

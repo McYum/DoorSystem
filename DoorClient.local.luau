@@ -1250,10 +1250,9 @@ local function scanLocalPushIntent(now: number)
 			local torque = hingeAxis:Dot(radius:Cross(normalForce))
 			local openSign = if torque < 0 then -1 else 1
 
-			-- A seated/closing door must remain physically solid until the authoritative
-			-- snapshot proves it has actually started opening AWAY from this player. We still
-			-- send Push immediately, so walk-open responsiveness is preserved without the
-			-- one-frame ghost-door window that existed while a door was finishing its close.
+			-- At the jamb, do not even arm a yield until authoritative motion leaves the
+			-- seat. At wider angles this records intent, but renderLeaf still waits for a
+			-- server-acknowledged Pushed state before actually removing collision.
 			local closedSolidAngle = math.rad(Config.ClosedCollisionSolidAngleDeg or 6.0)
 			local inClosedSolidZone = math.abs(leaf.snapshotAngle) <= closedSolidAngle
 			local authoritativeOpeningAway = leaf.snapshotVelocity * openSign >= math.rad(Config.LocalPushYieldMinAngularSpeedDeg or 28)
@@ -1484,11 +1483,12 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 			localPushStates[leaf.rig] = nil
 			pushState = nil
 		elseif Config.LocalPushCollisionYield == true and not locked and pushState and serverNow <= pushState.expiresAt then
-			local minPred = math.rad(Config.LocalPushYieldMinPredictionDeg or 2.5)
-			local minSpeed = math.rad(Config.LocalPushYieldMinAngularSpeedDeg or 28)
-			local movingAway = leaf.visualVelocity * pushState.sign >= minSpeed
-			local predictedAway = leaf.prediction * pushState.sign >= minPred
-			if movingAway or predictedAway then
+			-- Prediction may show the intended opening before the server has accepted the
+			-- contact. Never remove collision on prediction alone: during auto-close that
+			-- let the player clear the slab, ending the push before the leaf could reverse.
+			local authoritativeOpeningAway = leaf.mode == "Pushed"
+				and leaf.snapshotVelocity * pushState.sign > math.rad(1)
+			if authoritativeOpeningAway then
 				shouldYield = true
 				leaf.localCollisionYieldUntil = math.max(leaf.localCollisionYieldUntil, serverNow + (Config.LocalPushCollisionYieldTime or 0.16))
 			end
