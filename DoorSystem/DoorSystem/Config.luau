@@ -75,9 +75,7 @@ return table.freeze({
 	-- keep a brief touch from storing enough momentum to fling the leaf fully open.
 	PushTotalMaxAccelerationDeg = 720,
 	PushMaxAngularSpeedDeg = 105,
-	-- Preserve enough earned momentum for a committed walk-through to open the leaf,
-	-- while the acceleration ramp still keeps a brief touch to a small nudge.
-	PushReleaseDrag = 1.25,
+	PushReleaseDrag = 4.8,
 	-- While a player is actively pushing, the hinge also tries to match the linear
 	-- speed at the contact radius. This is what makes sprinting open the leaf faster
 	-- instead of merely applying the same weak torque as walking.
@@ -226,7 +224,9 @@ return table.freeze({
 	-- Only the LOCAL pusher gets temporary collision yield, and only while their
 	-- current movement is driving the door away from their current side. Other players
 	-- keep their own solid local proxy, while the server collider remains authoritative.
-	LocalPushCollisionYield = true,
+	-- Keep the local mirror solid while pushing. It already follows the rendered hinge,
+	-- so yielding it would let the avatar ghost through before the door opens far enough.
+	LocalPushCollisionYield = false,
 	LocalPushCollisionYieldTime = 0.16,
 	LocalPushYieldMinPredictionDeg = 2.5,
 	LocalPushYieldMinAngularSpeedDeg = 28,
