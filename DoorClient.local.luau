@@ -12,7 +12,7 @@ local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
-local DOOR_SYSTEM_VERSION = "7.7.0"
+local DOOR_SYSTEM_VERSION = "7.8.0"
 -- Client configuration is inlined so DoorClient is self-contained.
 local Config = {
 	Version = DOOR_SYSTEM_VERSION,
@@ -51,6 +51,7 @@ local Config = {
 
 	-- Interaction presentation
 	LocalPromptProxy = true,
+	CustomPromptStyle = true,
 	LocalCollisionMirror = true,
 	LocalPushScanHz = 60,
 	PushSendInterval = 0.045,
@@ -83,6 +84,17 @@ local Config = {
 	BreachParticleCount = 28,
 }
 local UISpr = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Hud"):WaitForChild("UISpr"))
+local DoorAccess: any = nil
+do
+	local sharedFolder = ReplicatedStorage:FindFirstChild("DoorSystemShared")
+	local accessModule = sharedFolder and sharedFolder:FindFirstChild("DoorAccess")
+	if accessModule and accessModule:IsA("ModuleScript") then
+		local ok, result = pcall(require, accessModule)
+		if ok and typeof(result) == "table" then
+			DoorAccess = result
+		end
+	end
+end
 local remotesInstance = ReplicatedStorage:WaitForChild(Config.RemotesFolderName, 10)
 if not remotesInstance or not remotesInstance:IsA("Folder") then
 	error(("[DoorSystem] Client could not find ReplicatedStorage.%s after 10 seconds. "
@@ -439,6 +451,9 @@ local function createLocalPrompt(name: string, actionText: string, objectText: s
 	prompt.MaxActivationDistance = distance
 	prompt.HoldDuration = hold
 	prompt.RequiresLineOfSight = false
+	if Config.CustomPromptStyle then
+		prompt.Style = Enum.ProximityPromptStyle.Custom
+	end
 	prompt.Parent = attachment
 	return prompt
 end
@@ -470,6 +485,26 @@ local function leafOrAssemblyLooksOpen(leaf: ClientLeaf, assembly: Model): boole
 		return false
 	end
 	return oneLooksOpen(leaf)
+end
+
+local function playerSideForLeaf(leaf: ClientLeaf): string
+	if not localRoot or not leaf.hingeToCollision then
+		return "Front"
+	end
+	local currentCF = leaf.hinge.CFrame
+		* CFrame.Angles(0, leaf.visualAngle, 0)
+		* leaf.hingeToCollision
+	return if currentCF:PointToObjectSpace(localRoot.Position).Z >= 0 then "Front" else "Back"
+end
+
+local function canPlayerAccess(leaf: ClientLeaf, assembly: Model, action: string): boolean
+	if not DoorAccess then
+		return true
+	end
+	local ok, allowed = pcall(DoorAccess.Check, player, assembly, action, playerSideForLeaf(leaf), leaf.rig)
+	-- The server remains authoritative. If a custom client checker fails, preserve the
+	-- prompt so a valid server interaction is not made inaccessible.
+	return not ok or allowed == true
 end
 
 local function ensureLocalPromptProxy(leaf: ClientLeaf)
@@ -596,10 +631,18 @@ local function updateLocalPromptState(leaf: ClientLeaf)
 		if leaf.broken then
 			leaf.doorPrompt.Enabled = false
 		else
+			local locked = assembly:GetAttribute("Locked") == true
+			local looksOpen = leafOrAssemblyLooksOpen(leaf, assembly)
+			local action = if looksOpen then "Close" else "Open"
+			local allowed = canPlayerAccess(leaf, assembly, action)
+			local hideUnavailable = setting(leaf.rig, assembly, "HideUnavailablePrompts", false) == true
 			leaf.doorPrompt.Enabled = setting(leaf.rig, assembly, "PromptEnabled", true) ~= false
-			if assembly:GetAttribute("Locked") == true then
-				leaf.doorPrompt.ActionText = tostring(setting(leaf.rig, assembly, "PromptLockedText", "Locked"))
-			elseif leafOrAssemblyLooksOpen(leaf, assembly) then
+				and (allowed or not hideUnavailable)
+			if locked then
+				leaf.doorPrompt.ActionText = if allowed
+					then tostring(setting(leaf.rig, assembly, "PromptUnlockText", "Unlock & Open"))
+					else tostring(setting(leaf.rig, assembly, "PromptLockedText", "Locked"))
+			elseif looksOpen then
 				leaf.doorPrompt.ActionText = tostring(setting(leaf.rig, assembly, "PromptCloseText", "Close"))
 			else
 				leaf.doorPrompt.ActionText = tostring(setting(leaf.rig, assembly, "PromptActionText", "Open"))
@@ -608,11 +651,13 @@ local function updateLocalPromptState(leaf: ClientLeaf)
 	end
 
 	if leaf.lockPrompt then
+		local action = if assembly:GetAttribute("Locked") == true then "Unlock" else "Lock"
 		leaf.lockPrompt.Enabled = not leaf.broken
 			and assembly:GetAttribute("Breached") ~= true
 			and setting(leaf.rig, assembly, "LockPromptEnabled", false) == true
 			and setting(leaf.rig, assembly, "AllowPlayerLocking", false) == true
-		leaf.lockPrompt.ActionText = if assembly:GetAttribute("Locked") == true then "Unlock" else "Lock"
+			and canPlayerAccess(leaf, assembly, action)
+		leaf.lockPrompt.ActionText = action
 	end
 
 	if leaf.kickPrompt then

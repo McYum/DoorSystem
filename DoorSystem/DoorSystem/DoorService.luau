@@ -9,10 +9,13 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
 local Config = require(script.Parent.Config)
+local sharedFolder = ReplicatedStorage:WaitForChild("DoorSystemShared", 10)
+assert(sharedFolder, "[DoorSystem] ReplicatedStorage.DoorSystemShared is missing")
+local DoorAccess = require(sharedFolder:WaitForChild("DoorAccess"))
 
 local DoorService = {}
-DoorService.VERSION = Config.Version or "7.7.0"
-DoorService.VERSION_NAME = Config.VersionName or "DoorSystem v7.7"
+DoorService.VERSION = Config.Version or "7.8.0"
+DoorService.VERSION_NAME = Config.VersionName or "DoorSystem v7.8"
 
 function DoorService.GetVersion(): (string, string)
 	return DoorService.VERSION, DoorService.VERSION_NAME
@@ -649,6 +652,9 @@ local function makePrompt(leaf: LeafState): ProximityPrompt?
 
 	local existing = leaf.collision:FindFirstChild("DoorPrompt")
 	if existing and existing:IsA("ProximityPrompt") then
+		if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+			existing.Style = Enum.ProximityPromptStyle.Custom
+		end
 		return existing
 	end
 
@@ -676,6 +682,9 @@ local function makePrompt(leaf: LeafState): ProximityPrompt?
 	prompt.MaxActivationDistance = setting(leaf.rig, leaf.assembly, "PromptDistance", Config.PromptDistance)
 	prompt.HoldDuration = setting(leaf.rig, leaf.assembly, "PromptHoldDuration", Config.PromptHoldDuration)
 	prompt.RequiresLineOfSight = false
+	if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+		prompt.Style = Enum.ProximityPromptStyle.Custom
+	end
 	prompt.Parent = attachment
 	return prompt
 end
@@ -701,6 +710,9 @@ local function makeLockPrompt(leaf: LeafState): ProximityPrompt?
 	prompt.MaxActivationDistance = setting(leaf.rig, leaf.assembly, "LockPromptDistance", Config.LockPromptDistance)
 	prompt.HoldDuration = setting(leaf.rig, leaf.assembly, "LockPromptHoldDuration", Config.LockPromptHoldDuration)
 	prompt.RequiresLineOfSight = false
+	if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+		prompt.Style = Enum.ProximityPromptStyle.Custom
+	end
 	prompt.Parent = attachment
 	return prompt
 end
@@ -722,6 +734,9 @@ local function makeKickPrompt(leaf: LeafState): ProximityPrompt?
 	prompt.MaxActivationDistance = setting(leaf.rig, leaf.assembly, "KickPromptDistance", Config.KickPromptDistance)
 	prompt.HoldDuration = setting(leaf.rig, leaf.assembly, "KickPromptHoldDuration", Config.KickPromptHoldDuration)
 	prompt.RequiresLineOfSight = false
+	if setting(leaf.rig, leaf.assembly, "CustomPromptStyle", Config.CustomPromptStyle) == true then
+		prompt.Style = Enum.ProximityPromptStyle.Custom
+	end
 	prompt.Parent = attachment
 	return prompt
 end
@@ -735,6 +750,10 @@ local function playerSideForLeaf(leaf: LeafState, player: Player): string
 	local currentCF = getCollisionPose(leaf, leaf.angle)
 	local localPos = currentCF:PointToObjectSpace(root.Position)
 	return if localPos.Z >= 0 then "Front" else "Back"
+end
+
+local function canPlayerAccess(leaf: LeafState, player: Player, action: string): (boolean, string?)
+	return DoorAccess.Check(player, leaf.assembly, action, playerSideForLeaf(leaf, player), leaf.rig)
 end
 
 local function torqueSignFromForce(leaf: LeafState, contactWorld: Vector3, forceWorld: Vector3): number
@@ -980,6 +999,12 @@ local function requestPromptOpen(leaf: LeafState, player: Player?, animateHandle
 	end
 
 	local side = player and playerSideForLeaf(leaf, player) or "Front"
+	if assemblyState.locked and player then
+		local allowed = DoorAccess.Check(player, leaf.assembly, "Open", side, leaf.rig)
+		if allowed then
+			DoorService.SetLocked(leaf.assembly, false, player)
+		end
+	end
 	local commandSerial = beginLeafCommand(leaf)
 	if assemblyState.locked then
 		local attemptSign = chooseOpenSign(leaf, player)
@@ -1163,7 +1188,7 @@ local function connectLeafPrompts(state: AssemblyState, leaf: LeafState)
 	if leaf.lockPrompt then
 		leaf.lockPrompt.Triggered:Connect(function(player)
 			if setting(leaf.rig, state.model, "AllowPlayerLocking", Config.AllowPlayerLocking) then
-				DoorService.ToggleLock(state.model, player)
+				DoorService.ToggleLock(state.model, player, leaf.rig)
 			end
 		end)
 	end
@@ -1248,7 +1273,7 @@ local function handleClientInteraction(player: Player, rig: Instance, action: an
 		if not playerWithinInteractionRange(player, leaf, distance) then
 			return
 		end
-		DoorService.ToggleLock(state.model, player)
+		DoorService.ToggleLock(state.model, player, leaf.rig)
 	elseif actionName == "Kick" then
 		if not setting(leaf.rig, state.model, "KickPromptEnabled", Config.KickPromptEnabled) then
 			return
@@ -2922,12 +2947,24 @@ function DoorService.SetState(assembly: Model, stateName: string)
 	end
 end
 
-function DoorService.ToggleLock(assembly: Model, player: Player?)
+function DoorService.ToggleLock(assembly: Model, player: Player?, leafRig: Model?): boolean
 	local state = assemblies[assembly] or DoorService.Register(assembly)
 	if not state then
-		return
+		return false
+	end
+	local leaf = if leafRig then leafByRig[leafRig] else state.leaves[1]
+	if not leaf or leaf.assembly ~= assembly then
+		return false
+	end
+	if player then
+		local action = if state.locked or state.pendingLock then "Unlock" else "Lock"
+		local allowed = canPlayerAccess(leaf, player, action)
+		if not allowed then
+			return false
+		end
 	end
 	DoorService.SetLocked(assembly, not (state.locked or state.pendingLock), player)
+	return true
 end
 
 function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
@@ -3315,6 +3352,18 @@ function DoorService.GetState(assembly: Model): AssemblyState?
 	return assemblies[assembly]
 end
 
+function DoorService.CanPlayerAccess(assembly: Model, player: Player, action: string, leafRig: Model?): (boolean, string?)
+	local state = assemblies[assembly] or DoorService.Register(assembly)
+	if not state then
+		return false, "InvalidDoor"
+	end
+	local leaf = if leafRig then leafByRig[leafRig] else state.leaves[1]
+	if not leaf or leaf.assembly ~= assembly then
+		return false, "InvalidLeaf"
+	end
+	return canPlayerAccess(leaf, player, action)
+end
+
 function DoorService.Start()
 	if started then
 		return
@@ -3324,11 +3373,17 @@ function DoorService.Start()
 	script.Parent:SetAttribute("Version", nil)
 	script.Parent:SetAttribute("VersionName", nil)
 
-	for _, tagged in CollectionService:GetTagged(Config.Tag) do
-		if tagged:IsA("Model") then
-			DoorService.Register(tagged)
+	local function registerTaggedDoors()
+		for _, tagged in CollectionService:GetTagged(Config.Tag) do
+			if tagged:IsA("Model") and tagged.Parent then
+				DoorService.Register(tagged)
+			end
 		end
 	end
+	registerTaggedDoors()
+	-- Authored CollectionService tags can become queryable just after server scripts
+	-- start. Rescan once after data-model initialization; Register is idempotent.
+	task.delay(1, registerTaggedDoors)
 	CollectionService:GetInstanceAddedSignal(Config.Tag):Connect(function(inst)
 		if inst:IsA("Model") then
 			DoorService.Register(inst)

@@ -4,8 +4,8 @@
 -- All values can be overridden with Attributes on the top-level assembly or LeafRig.
 
 return table.freeze({
-	Version = "7.7.0",
-	VersionName = "DoorSystem v7.7",
+	Version = "7.8.0",
+	VersionName = "DoorSystem v7.8",
 	Tag = "DoorSystemDoor",
 	RemotesFolderName = "DoorSystemRemotes",
 
@@ -39,8 +39,20 @@ return table.freeze({
 	-- Core behavior
 	PushEnabled = true,
 	PromptEnabled = true,
+	CustomPromptStyle = true,
 	LockPromptEnabled = false,
 	AllowPlayerLocking = false,
+	-- LockType="Key" requires an inventory item whose DoorKeyId matches
+	-- RequiredKeyId. LockType="Side" requires LockSide ("Front"/"Back") and
+	-- no item. Existing doors default to None and retain their old behavior.
+	LockType = "None",
+	LockSide = "Front",
+	RequiredKeyId = "",
+	RequiredItemName = "",
+	RequiredItemCategory = "DoorKey",
+	OpenRequiresItem = false,
+	UseRequirementChecker = true,
+	HideUnavailablePrompts = false,
 	AutoClose = true,
 	AutoCloseDelay = 0.85,
 	-- Ignore tiny hinge vibrations when deciding whether an automatic return is needed.
@@ -268,6 +280,7 @@ return table.freeze({
 	PromptActionText = "Open",
 	PromptCloseText = "Close",
 	PromptLockedText = "Locked",
+	PromptUnlockText = "Unlock & Open",
 	PromptObjectText = "Door",
 	PromptDistance = 7,
 	PromptHoldDuration = 0,

@@ -111,7 +111,7 @@ if not okStart then
 	return
 end
 
-local version = tostring(DoorService.VERSION or "7.7.0")
+local version = tostring(DoorService.VERSION or "7.8.0")
 local versionName = tostring(DoorService.VERSION_NAME or ("DoorSystem v" .. version))
 -- Clean version Attributes left by older packages; versioning is internal only.
 systemFolder:SetAttribute("Version", nil)
