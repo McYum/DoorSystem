@@ -2490,8 +2490,10 @@ local function integrateLeaf(leaf: LeafState, dt: number)
 		and not kickMotion
 		and not externalMotion
 		and setting(leaf.rig, leaf.assembly, "LimitSpringEnabled", Config.LimitSpringEnabled) ~= false
+	local softLimitRange = 0
 	if softLimit then
-		local springRange = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "LimitSpringRangeDeg", Config.LimitSpringRangeDeg)) or Config.LimitSpringRangeDeg)
+		local springRange = math.clamp(math.rad(tonumber(setting(leaf.rig, leaf.assembly, "LimitSpringRangeDeg", Config.LimitSpringRangeDeg)) or Config.LimitSpringRangeDeg), 0, maxAngle)
+		softLimitRange = springRange
 		local springStart = math.max(0, maxAngle - springRange)
 		if math.abs(leaf.angle) > springStart then
 			local springTarget = signNonZero(leaf.angle) * springStart
@@ -2503,6 +2505,18 @@ local function integrateLeaf(leaf: LeafState, dt: number)
 	end
 
 	local candidateVelocity = clampAbs(leaf.velocity + acceleration * dt, maxAngular)
+	if softLimit and softLimitRange > 0 then
+		-- Active push drivers may continue adding outward speed while the player leans
+		-- on the stopped door. Reduce the permitted outward speed continuously to zero
+		-- so the hard clamp never alternates between impact and another push impulse.
+		local remaining = math.max(0, maxAngle - math.abs(leaf.angle))
+		local alpha = math.clamp(remaining / softLimitRange, 0, 1)
+		local eased = alpha * alpha * (3 - 2 * alpha)
+		local outwardSign = signNonZero(if math.abs(leaf.angle) > 1e-5 then leaf.angle else candidateVelocity)
+		if candidateVelocity * outwardSign > 0 then
+			candidateVelocity = outwardSign * math.min(math.abs(candidateVelocity), maxAngular * eased)
+		end
+	end
 	local candidateAngle = leaf.angle + candidateVelocity * dt
 
 	local bounceDefault = if breachMotion then (Config.BreachLimitBounce or Config.LimitBounce) elseif kickMotion then (Config.KickLimitBounce or Config.LimitBounce) else Config.LimitBounce

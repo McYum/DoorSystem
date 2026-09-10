@@ -36,6 +36,7 @@ local Config = {
 	PredictionMaxDeg = 15.0,
 	PredictionGain = 0.075,
 	PredictionDecay = 22,
+	LimitSpringRangeDeg = 16,
 	HandleEnabled = true,
 	HandleAxis = "Z",
 	HandlePressDeg = -26,
@@ -1347,7 +1348,14 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	if not stableCollisionState and localRoot then
 		local rootDelta = localRoot.Position - leaf.hinge.Position
 		if rootDelta:Dot(rootDelta) <= 169 then
-			desiredAngle += updateLocalPrediction(leaf, dt)
+			local prediction = updateLocalPrediction(leaf, dt)
+			if desiredAngle * prediction > 0 then
+				local springRange = math.rad(tonumber(setting(leaf.rig, assembly, "LimitSpringRangeDeg", Config.LimitSpringRangeDeg)) or Config.LimitSpringRangeDeg)
+				local remaining = math.max(0, maxAngle - math.abs(desiredAngle))
+				local alpha = math.clamp(remaining / math.max(springRange, 1e-4), 0, 1)
+				prediction *= alpha * alpha * (3 - 2 * alpha)
+			end
+			desiredAngle = math.clamp(desiredAngle + prediction, -maxAngle, maxAngle)
 		else
 			leaf.prediction *= math.exp(-Config.PredictionDecay * dt)
 		end
