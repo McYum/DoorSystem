@@ -1907,6 +1907,12 @@ local function computePushContact(
 		-- Extremely close to the hinge: use an explicit normal-force sign fallback.
 		torqueSign = torqueSignFromForce(leaf, contactWorld, normalForce)
 	end
+	local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
+	if math.abs(leaf.angle) >= preserveDirectionAngle and leaf.angle * torqueSign < 0 then
+		-- Crossing the rotated slab changes which local side contains the player's root.
+		-- Keep an already-open door moving outward instead of reversing into the player.
+		torqueSign = signNonZero(leaf.angle)
+	end
 	local signedLever = torqueSign * math.max(math.abs(torquePerUnitForce), minimumLever)
 
 	return true, signedLever, normalSpeed, surfaceGap, contactFactor

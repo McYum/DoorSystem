@@ -59,6 +59,7 @@ local Config = {
 	PushContactSurfaceGap = 1.48,
 	PushMaxLeadTime = 0.095,
 	PushLeadExtraGap = 0.52,
+	PushPreserveOpenDirectionDeg = 8,
 	LocalPushCollisionYield = false,
 	LocalPushCollisionYieldTime = 0.10,
 	LocalPushYieldMinPredictionDeg = 2.5,
@@ -1145,6 +1146,10 @@ local function updateLocalPrediction(leaf: ClientLeaf, dt: number): number
 				local normalForce = -cf.ZVector * sideSign
 				local torque = hingeAxis:Dot(radius:Cross(normalForce))
 				local sign = if torque < 0 then -1 else 1
+				local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
+				if math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * sign < 0 then
+					sign = if leaf.snapshotAngle < 0 then -1 else 1
+				end
 				local closeness = if surfaceGap <= contactGap then 1 else math.clamp(1 - timeToSurface / math.max(maxLead, 1e-3), 0, 1) * 0.45
 				local maxPred = math.rad(tonumber(setting(leaf.rig, assembly, "PredictionMaxDeg", Config.PredictionMaxDeg)) or Config.PredictionMaxDeg)
 				local speedFactor = math.clamp(normalSpeed / 14, 0.35, 1.55)
@@ -1248,6 +1253,10 @@ local function scanLocalPushIntent(now: number)
 			local normalForce = -cf.ZVector * sideSign
 			local torque = hingeAxis:Dot(radius:Cross(normalForce))
 			local openSign = if torque < 0 then -1 else 1
+			local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
+			if math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * openSign < 0 then
+				openSign = if leaf.snapshotAngle < 0 then -1 else 1
+			end
 
 			-- A seated/closing door must remain physically solid until the authoritative
 			-- snapshot proves it has actually started opening AWAY from this player. We still

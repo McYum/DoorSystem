@@ -65,16 +65,16 @@ return table.freeze({
 	VirtualMass = 5.6,
 	EffectivePlayerMass = 11.5,
 	PushImpulseScale = 0.52,
-	ContinuousPushScale = 0.10,
+	ContinuousPushScale = 0.13,
 	PushIntentGrace = 0.24,
 	PushDriveResponse = 14.5,
 	-- Ease sustained contact in instead of reaching full drive on the first simulation step.
-	PushDriveRampTime = 0.16,
+	PushDriveRampTime = 0.11,
 	PushDriveMaxAccelerationDeg = 5200,
 	-- Final caps are applied after all active player drivers have been combined. They
 	-- keep a brief touch from storing enough momentum to fling the leaf fully open.
-	PushTotalMaxAccelerationDeg = 720,
-	PushMaxAngularSpeedDeg = 105,
+	PushTotalMaxAccelerationDeg = 1050,
+	PushMaxAngularSpeedDeg = 130,
 	PushReleaseDrag = 4.8,
 	-- While a player is actively pushing, the hinge also tries to match the linear
 	-- speed at the contact radius. This is what makes sprinting open the leaf faster
@@ -82,8 +82,8 @@ return table.freeze({
 	PushFollowVelocityScale = 0.72,
 	PushFollowVelocityResponse = 15.0,
 	PushFollowMinAngularSpeedDeg = 0,
-	PushFollowMaxAngularSpeedDeg = 105,
-	PushFollowMaxAccelerationDeg = 700,
+	PushFollowMaxAngularSpeedDeg = 130,
+	PushFollowMaxAccelerationDeg = 1000,
 	-- Preserve the approach speed for a fraction of a second after the avatar hits the
 	-- solid slab. Otherwise Roblox collision can zero AssemblyLinearVelocity and make
 	-- sprinting paradoxically push LESS than walking.
@@ -99,6 +99,9 @@ return table.freeze({
 	PushFallbackWalkSpeed = 12.5,
 	PushLeadExtraGap = 0.52,
 	MinimumPushLeverFraction = 0.28,
+	-- Once a leaf is meaningfully open, player contact keeps driving it outward.
+	-- This prevents the contact side from flipping as an avatar crosses the slab.
+	PushPreserveOpenDirectionDeg = 8,
 	PushCollisionYieldTime = 0,
 	PushCollisionYieldMinAccelDeg = 99999,
 	HybridCollision = false,
@@ -117,7 +120,7 @@ return table.freeze({
 	-- not feel like an anchored wall.
 	StrongContactSurfaceGap = 1.48,
 	PreContactInitialPushMaxAngularSpeedDeg = 6,
-	InitialPushMaxAngularSpeedDeg = 12,
+	InitialPushMaxAngularSpeedDeg = 14,
 	MaxAngularSpeedDeg = 320,
 	FreeDrag = 0.95,
 	LimitBounce = 0.16,
