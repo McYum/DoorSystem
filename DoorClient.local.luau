@@ -1132,23 +1132,25 @@ local function updateLocalPrediction(leaf: ClientLeaf, dt: number): number
 				or (timeToSurface <= maxLead and surfaceGap <= contactGap + (Config.PushLeadExtraGap or 0.52))
 
 			if movingToward and lateralOk and heightOk and inLeadWindow then
+				local closing = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer" or leaf.snapshotAngle * leaf.snapshotVelocity < 0
+				local directionCF = if closing and leaf.hingeToCollision then leaf.hinge.CFrame * leaf.hingeToCollision else cf
+				local directionLocal = if closing then directionCF:PointToObjectSpace(localRoot.Position) else localPos
 				local contactLocal = Vector3.new(
-					math.clamp(localPos.X, -half.X, half.X),
-					math.clamp(localPos.Y, -half.Y, half.Y),
+					math.clamp(directionLocal.X, -half.X, half.X),
+					math.clamp(directionLocal.Y, -half.Y, half.Y),
 					0
 				)
-				local contactWorld = cf:PointToWorldSpace(contactLocal)
+				local contactWorld = directionCF:PointToWorldSpace(contactLocal)
 				local hingeAxis = leaf.hinge.CFrame.UpVector
 				local radius = contactWorld - leaf.hinge.Position
 				-- Side determines direction. Speed only determines magnitude. This prevents a
 				-- previously prompt-opened/rotated leaf from predicting back toward the pusher.
-				local sideSign = if localPos.Z >= 0 then 1 else -1
-				local normalForce = -cf.ZVector * sideSign
+				local sideSign = if directionLocal.Z >= 0 then 1 else -1
+				local normalForce = -directionCF.ZVector * sideSign
 				local torque = hingeAxis:Dot(radius:Cross(normalForce))
 				local sign = if torque < 0 then -1 else 1
 				local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-				local openingOrStationary = leaf.snapshotAngle * leaf.snapshotVelocity >= 0
-				if openingOrStationary and math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * sign < 0 then
+				if not closing and math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * sign < 0 then
 					sign = if leaf.snapshotAngle < 0 then -1 else 1
 				end
 				local closeness = if surfaceGap <= contactGap then 1 else math.clamp(1 - timeToSurface / math.max(maxLead, 1e-3), 0, 1) * 0.45
@@ -1242,21 +1244,23 @@ local function scanLocalPushIntent(now: number)
 		if lateralOk and heightOk and movingToward and (touchingRange or imminent) then
 			-- Compute a fresh AWAY-FROM-PLAYER hinge sign from the CURRENT leaf pose.
 			-- Never reuse the previous prompt/open direction.
+			local closing = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer" or leaf.snapshotAngle * leaf.snapshotVelocity < 0
+			local directionCF = if closing and leaf.hingeToCollision then leaf.hinge.CFrame * leaf.hingeToCollision else cf
+			local directionLocal = if closing then directionCF:PointToObjectSpace(localRoot.Position) else currentLocal
 			local contactLocal = Vector3.new(
-				math.clamp(currentLocal.X, -half.X, half.X),
-				math.clamp(currentLocal.Y, -half.Y, half.Y),
+				math.clamp(directionLocal.X, -half.X, half.X),
+				math.clamp(directionLocal.Y, -half.Y, half.Y),
 				0
 			)
-			local contactWorld = cf:PointToWorldSpace(contactLocal)
+			local contactWorld = directionCF:PointToWorldSpace(contactLocal)
 			local hingeAxis = leaf.hinge.CFrame.UpVector
 			local radius = contactWorld - leaf.hinge.Position
-			local sideSign = if currentLocal.Z >= 0 then 1 else -1
-			local normalForce = -cf.ZVector * sideSign
+			local sideSign = if directionLocal.Z >= 0 then 1 else -1
+			local normalForce = -directionCF.ZVector * sideSign
 			local torque = hingeAxis:Dot(radius:Cross(normalForce))
 			local openSign = if torque < 0 then -1 else 1
 			local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-			local openingOrStationary = leaf.snapshotAngle * leaf.snapshotVelocity >= 0
-			if openingOrStationary and math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * openSign < 0 then
+			if not closing and math.abs(leaf.snapshotAngle) >= preserveDirectionAngle and leaf.snapshotAngle * openSign < 0 then
 				openSign = if leaf.snapshotAngle < 0 then -1 else 1
 			end
 

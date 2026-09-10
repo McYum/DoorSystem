@@ -1883,22 +1883,22 @@ local function computePushContact(
 		contactFactor = 0.62 + 0.38 * depth
 	end
 
-	-- Direction is derived from the player's CURRENT side of the CURRENT rotated slab,
-	-- not from a cached prompt direction and not from tangential movement noise. The
-	-- player therefore always drives the leaf AWAY from the side they are standing on.
-	-- This remains correct after prompt opens, partial opens, reversals, and opposite-side
-	-- multiplayer pushes. Movement speed still controls strength; side controls sign.
+	-- Normal pushes use the current slab plane. While closing, use the fixed doorway
+	-- plane so the tilted leaf cannot misclassify a returning player after they cross.
+	local closing = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer" or leaf.angle * leaf.velocity < 0
+	local directionCF = if closing then leaf.closedCollisionCF else cf
+	local directionLocal = if closing then directionCF:PointToObjectSpace(position) else currentLocal
 	local contactLocal = Vector3.new(
-		math.clamp(currentLocal.X, -half.X, half.X),
-		math.clamp(currentLocal.Y, -half.Y, half.Y),
+		math.clamp(directionLocal.X, -half.X, half.X),
+		math.clamp(directionLocal.Y, -half.Y, half.Y),
 		0
 	)
-	local contactWorld = cf:PointToWorldSpace(contactLocal)
+	local contactWorld = directionCF:PointToWorldSpace(contactLocal)
 	local hingeAxis = leaf.hinge.CFrame.UpVector
 	local radius = contactWorld - leaf.hinge.Position
 	local planarRadius = radius - hingeAxis * radius:Dot(hingeAxis)
-	local sideSign = if currentLocal.Z >= 0 then 1 else -1
-	local normalForce = -cf.ZVector * sideSign -- from player side through the slab
+	local sideSign = if directionLocal.Z >= 0 then 1 else -1
+	local normalForce = -directionCF.ZVector * sideSign -- from player side through the slab
 	local torquePerUnitForce = hingeAxis:Dot(planarRadius:Cross(normalForce))
 	local width = math.max(0.5, leaf.collision.Size.X)
 	local minimumLever = width * (tonumber(setting(leaf.rig, leaf.assembly, "MinimumPushLeverFraction", Config.MinimumPushLeverFraction)) or Config.MinimumPushLeverFraction)
@@ -1908,8 +1908,7 @@ local function computePushContact(
 		torqueSign = torqueSignFromForce(leaf, contactWorld, normalForce)
 	end
 	local preserveDirectionAngle = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "PushPreserveOpenDirectionDeg", Config.PushPreserveOpenDirectionDeg)) or Config.PushPreserveOpenDirectionDeg)
-	local openingOrStationary = leaf.angle * leaf.velocity >= 0
-	if openingOrStationary and math.abs(leaf.angle) >= preserveDirectionAngle and leaf.angle * torqueSign < 0 then
+	if not closing and math.abs(leaf.angle) >= preserveDirectionAngle and leaf.angle * torqueSign < 0 then
 		-- Crossing the rotated slab changes which local side contains the player's root.
 		-- Keep an already-open door moving outward instead of reversing into the player.
 		torqueSign = signNonZero(leaf.angle)
@@ -1974,6 +1973,12 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 	local sign = if signedLever >= 0 then 1 else -1
 	local lever = math.abs(signedLever)
 	if firstContact then
+		local reversingClose = leaf.mode == "Closing" or leaf.mode == "HeldForPlayer" or leaf.angle * leaf.velocity < 0
+		if reversingClose and leaf.velocity * sign < 0 then
+			-- Do not make the player fight stored auto-close momentum before the leaf
+			-- responds. The new push starts away from their doorway side immediately.
+			leaf.velocity = 0
+		end
 		-- Tiny acquisition nudge only. Sustained torque does the real work, which keeps
 		-- the door from behaving like an automatic proximity door.
 		local deltaOmega = (effectivePlayerMass * normalSpeed * lever / inertia) * impulseScale * contactFactor
