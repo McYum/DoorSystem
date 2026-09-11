@@ -84,7 +84,11 @@ contact is detected. At or above `SprintPushMinSpeed`, an unlocked closed door g
 kick-like launch without taking durability damage. All sprint values can be changed
 per door through attributes or `DoorConfig`. Sprint approaches use a longer swept
 contact window and side padding, so diagonal runs that genuinely cross the slab are
-accepted without treating near-tangential movement as an impact.
+accepted without treating near-tangential movement as an impact. The local player's
+private proxy now honors that swept contact immediately and preserves Humanoid move
+intent if the solid slab has already reduced measured velocity. The server performs
+the same geometry, direction, lock, and character-state validation before changing
+the authoritative hinge; other clients retain their own replicated solid proxy.
 
 Both authored handles animate together by default (`HandleAnimateBothSides`) so the
 movement is visible from either face. An optional `LockFrontMotor` and
@@ -94,5 +98,6 @@ include persistent `LockVisual` models with visible `LockFrontRoot` and
 `LockBackRoot` thumbturns. Their `Motor6D` root points are named `LockFrontMotor`
 and `LockBackMotor`. Each client springs those motors from the replicated `Locked`
 state; late joiners receive the correct angle immediately, while state changes are
-animated. The demos cover keyed both-side, keyless both-side, and restricted-side
-locking.
+animated. The motor offsets place each thumbturn at the center of its matching face
+plate so it remains attached to the leaf throughout door and lock motion. The demos
+cover keyed both-side, keyless both-side, and restricted-side locking.

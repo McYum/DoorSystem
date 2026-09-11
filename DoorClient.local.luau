@@ -12,7 +12,7 @@ local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
-local DOOR_SYSTEM_VERSION = "7.10.0"
+local DOOR_SYSTEM_VERSION = "7.10.1"
 -- Client configuration is inlined so DoorClient is self-contained.
 local Config = {
 	Version = DOOR_SYSTEM_VERSION,
@@ -76,11 +76,11 @@ local Config = {
 	SprintPushMaxLeadTime = 0.20,
 	SprintPushMinNormalIntent = 0.14,
 	LocalPushCollisionYield = true,
-	LocalPushCollisionYieldTime = 0.10,
+	LocalPushCollisionYieldTime = 0.16,
 	LocalPushYieldMinNormalSpeed = 6,
 	LocalPushYieldMinPredictionDeg = 2.5,
 	LocalPushYieldMinAngularSpeedDeg = 28,
-	LocalPushYieldClearance = 0.58,
+	LocalPushYieldClearance = 0.72,
 	ClosedCollisionSolidAngleDeg = 6.0,
 
 	-- Push intent is scanned locally and validated on the server.
@@ -192,7 +192,6 @@ export type LocalPushState = {
 	expiresAt: number,
 	sign: number,
 	normalSpeed: number,
-	surfaceGap: number,
 }
 local localPushStates: {[Model]: LocalPushState} = {}
 local promptBaseOffsets: {[ProximityPrompt]: Vector2} = setmetatable({}, {__mode = "k"})
@@ -1284,10 +1283,14 @@ local function scanLocalPushIntent(now: number)
 	end
 
 	local movement = localRoot.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
-	if movement.Magnitude < 0.65 then
-		local md = localHumanoid.MoveDirection * Vector3.new(1, 0, 1)
-		if md.Magnitude > 0.05 then
-			movement = md.Unit * math.max(localHumanoid.WalkSpeed * 0.82, 0.8)
+	local md = localHumanoid.MoveDirection * Vector3.new(1, 0, 1)
+	if md.Magnitude > 0.05 then
+		-- Character collision can partially erase velocity before the root reaches the
+		-- slab. Preserve server-visible Humanoid intent so the swept contact test does
+		-- not wait for physics to pin the player against the door first.
+		local intendedSpeed = math.max(localHumanoid.WalkSpeed * 0.82, 0.8)
+		if movement.Magnitude < intendedSpeed then
+			movement = md.Unit * intendedSpeed
 		end
 	end
 	if movement.Magnitude < 0.65 then
@@ -1387,14 +1390,13 @@ local function scanLocalPushIntent(now: number)
 			local torque = hingeAxis:Dot(radius:Cross(normalForce))
 			local openSign = if torque < 0 then -1 else 1
 
-			-- Record this geometrically validated contact immediately. renderLeaf can let
-			-- the local avatar through at body-contact range while the server independently
-			-- validates and starts the authoritative hinge on the same frame.
+			-- Record this geometrically validated contact immediately. renderLeaf can yield
+			-- for the short swept approach while the server independently validates and
+			-- starts the authoritative hinge.
 			localPushStates[leaf.rig] = {
 				expiresAt = now + (Config.LocalPushCollisionYieldTime or 0.16),
 				sign = openSign,
 				normalSpeed = normalSpeed,
-				surfaceGap = surfaceGap,
 			}
 
 			local last = pushSentAt[leaf.rig] or -math.huge
@@ -1412,15 +1414,17 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	if not renderModel then return end
 	local assembly = findAssembly(leaf.rig)
 	refreshLockIndicator(leaf, assembly)
-	local localNow = os.clock()
 	local pendingPush = localPushStates[leaf.rig]
 	local lockedForPush = assembly and assembly:GetAttribute("Locked") == true
 	local localContactYield = Config.LocalPushCollisionYield == true
 		and not lockedForPush
 		and pendingPush ~= nil
-		and localNow <= pendingPush.expiresAt
+		and serverNow <= pendingPush.expiresAt
 		and pendingPush.normalSpeed >= (tonumber(setting(leaf.rig, assembly, "LocalPushYieldMinNormalSpeed", Config.LocalPushYieldMinNormalSpeed)) or Config.LocalPushYieldMinNormalSpeed)
-		and pendingPush.surfaceGap <= (tonumber(setting(leaf.rig, assembly, "PushContactSurfaceGap", Config.PushContactSurfaceGap)) or Config.PushContactSurfaceGap)
+	-- A LocalPushState exists only after the short swept-volume, movement-direction,
+	-- side, height, and lock checks pass. Honor it immediately instead of waiting for
+	-- the root to enter the body-contact gap, when Roblox may already have killed the
+	-- player's sprint velocity against the solid proxy.
 	local dormantAngleEps = math.rad(Config.ClientDormantAngleEpsilonDeg or 0.025)
 	local dormantVelocityEps = math.rad(Config.ClientDormantVelocityEpsilonDeg or 0.20)
 	local dormantStable = isStableCollisionMode(leaf.mode)
@@ -1455,7 +1459,9 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	local maxAngle = math.rad(tonumber(setting(leaf.rig, assembly, "MaxAngleDeg", 108)) or 108)
 	desiredAngle = math.clamp(desiredAngle, -maxAngle, maxAngle)
 
-	local stableCollisionState = isStableCollisionMode(leaf.mode)
+	-- A locally validated approach temporarily leaves the stable render path too, so
+	-- the bounded visual prediction and the private collision yield begin together.
+	local stableCollisionState = isStableCollisionMode(leaf.mode) and not localContactYield
 	local closedSolidAngle = math.rad(Config.ClosedCollisionSolidAngleDeg or 6.0)
 	local openingAwayFromSeat = math.abs(leaf.snapshotVelocity) >= math.rad(Config.LocalPushYieldMinAngularSpeedDeg or 28)
 		and (math.abs(leaf.snapshotAngle) <= math.rad(0.05) or leaf.snapshotAngle * leaf.snapshotVelocity > 0)
@@ -1509,6 +1515,7 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 		or math.abs(leaf.prediction) > math.rad(0.02)
 		or math.abs(leaf.shakeAngle) > math.rad(0.01)
 		or math.abs(leaf.shakeVelocity) > math.rad(0.05)
+		or localContactYield
 	if not movingEstimate and math.abs(leaf.lastAppliedAngle - desiredAngle) < math.rad(0.02) then
 		return
 	end
@@ -1621,7 +1628,7 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 			leaf.localCollisionYieldUntil = 0
 			localPushStates[leaf.rig] = nil
 			pushState = nil
-		elseif Config.LocalPushCollisionYield == true and not locked and pushState and localNow <= pushState.expiresAt then
+		elseif Config.LocalPushCollisionYield == true and not locked and pushState and serverNow <= pushState.expiresAt then
 			local authoritativeOpeningAway = leaf.mode == "Pushed"
 				and leaf.snapshotVelocity * pushState.sign > math.rad(1)
 			if localContactYield or authoritativeOpeningAway then

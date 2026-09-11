@@ -1965,6 +1965,17 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 
 	local movement = sample.velocity * Vector3.new(1, 0, 1)
 	local moveDirection = sample.moveDirection * Vector3.new(1, 0, 1)
+	if moveDirection.Magnitude > 0.05 then
+		-- The server still derives this entirely from authoritative character state.
+		-- Preserve movement intent when contact with the solid slab has already reduced
+		-- measured velocity, otherwise a fast approach can be rejected until a later scan.
+		local intentFraction = tonumber(setting(leaf.rig, leaf.assembly, "PushIntentSpeedFraction", Config.PushIntentSpeedFraction)) or Config.PushIntentSpeedFraction
+		local maxEffectiveSpeed = tonumber(setting(leaf.rig, leaf.assembly, "PushMaxEffectiveSpeed", Config.PushMaxEffectiveSpeed)) or Config.PushMaxEffectiveSpeed
+		local intendedSpeed = math.min(maxEffectiveSpeed, math.max(0, sample.humanoid.WalkSpeed * intentFraction))
+		if movement.Magnitude < intendedSpeed then
+			movement = moveDirection.Unit * intendedSpeed
+		end
+	end
 	local isSprinting = playerIsSprinting(sample.player)
 	local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
 	local sprintApproach = isSprinting or movement.Magnitude >= sprintMinSpeed
