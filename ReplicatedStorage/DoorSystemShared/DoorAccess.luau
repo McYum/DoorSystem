@@ -213,7 +213,15 @@ function DoorAccess.Check(
 
 	local lockType = string.lower(tostring(setting(assembly, leafRig, {"LockType", "LockMode"}, "None")))
 	local requiredSide = nonEmptyString(setting(assembly, leafRig, {"LockSide", "RequiredSide"}, nil))
-	if lockType == "side" or lockType == "sided" or lockType == "inside" or lockType == "outside" or requiredSide then
+	local normalizedSide = string.lower(tostring(requiredSide or ""))
+	local bothSides = lockType == "free"
+		or lockType == "both"
+		or lockType == "bothsides"
+		or lockType == "anyside"
+		or normalizedSide == "both"
+		or normalizedSide == "either"
+		or normalizedSide == "any"
+	if not bothSides and (lockType == "side" or lockType == "sided" or lockType == "inside" or lockType == "outside" or requiredSide) then
 		requiredSide = requiredSide or (if lockType == "outside" then "Front" else "Back")
 		if string.lower(tostring(playerSide or "")) ~= string.lower(requiredSide) then
 			return false, "WrongSide"
@@ -236,6 +244,7 @@ function DoorAccess.Check(
 		return runChecker(checkerModule, player, assembly, action)
 	end
 	local hasUnlockRule = lockType == "key"
+		or bothSides
 		or lockType == "side"
 		or lockType == "sided"
 		or lockType == "inside"

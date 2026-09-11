@@ -15,7 +15,8 @@ Set these attributes on the tagged assembly (or on one leaf rig to override it):
 | `RequiredItemCategory` | `DoorKey` | Optional category restriction; defaults to `DoorKey` for keyed doors. |
 | `RequiredItemName` | `Door_Key_Demo` | Optional exact item/template name instead of, or in addition to, a key id. |
 | `LockType` | `Side` | No item is required; access is restricted by side. |
-| `LockSide` | `Front` or `Back` | Side allowed to lock/unlock and open a locked door. |
+| `LockType` | `Free` | No item is required; either side may lock/unlock. |
+| `LockSide` | `Front`, `Back`, or `Both` | Side allowed to lock/unlock and open a locked door. `Both` also works with keyed doors. |
 | `HideUnavailablePrompts` | `true` | Hides unavailable secondary controls; the main try/open prompt remains visible. |
 | `OpenRequiresItem` | `true` | Also checks the item while the door is unlocked. |
 | `PromptStackSpacing` | `58` | Vertical spacing between currently available door actions. |
@@ -88,5 +89,10 @@ accepted without treating near-tangential movement as an impact.
 Both authored handles animate together by default (`HandleAnimateBothSides`) so the
 movement is visible from either face. An optional `LockFrontMotor` and
 `LockBackMotor` can drive authored thumbturn models between
-`LockIndicatorUnlockedDeg` and `LockIndicatorLockedDeg`. The two lockable Studio
-demos include persistent `LockVisual` models with these roots and motors.
+`LockIndicatorUnlockedDeg` and `LockIndicatorLockedDeg`. The lockable Studio demos
+include persistent `LockVisual` models with visible `LockFrontRoot` and
+`LockBackRoot` thumbturns. Their `Motor6D` root points are named `LockFrontMotor`
+and `LockBackMotor`. Each client springs those motors from the replicated `Locked`
+state; late joiners receive the correct angle immediately, while state changes are
+animated. The demos cover keyed both-side, keyless both-side, and restricted-side
+locking.

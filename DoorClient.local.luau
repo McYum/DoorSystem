@@ -12,7 +12,7 @@ local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
-local DOOR_SYSTEM_VERSION = "7.9.1"
+local DOOR_SYSTEM_VERSION = "7.10.0"
 -- Client configuration is inlined so DoorClient is self-contained.
 local Config = {
 	Version = DOOR_SYSTEM_VERSION,
