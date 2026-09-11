@@ -4,8 +4,8 @@
 -- All values can be overridden with Attributes on the top-level assembly or LeafRig.
 
 return table.freeze({
-	Version = "7.10.1",
-	VersionName = "DoorSystem v7.10.1",
+	Version = "7.10.2",
+	VersionName = "DoorSystem v7.10.2",
 	Tag = "DoorSystemDoor",
 	RemotesFolderName = "DoorSystemRemotes",
 

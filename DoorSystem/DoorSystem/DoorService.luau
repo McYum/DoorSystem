@@ -3057,6 +3057,40 @@ function DoorService.ToggleLock(assembly: Model, player: Player?, leafRig: Model
 	return true
 end
 
+local function launchClosedAssemblyCompanions(state: AssemblyState, struckLeaf: LeafState, player: Player?)
+	local now = os.clock()
+	for _, companion in state.leaves do
+		if companion == struckLeaf or companion.broken then
+			continue
+		end
+
+		beginLeafCommand(companion)
+		table.clear(companion.drivers)
+		table.clear(companion.contacts)
+
+		local sign = chooseOpenSign(companion, player)
+		local kickImpulse = tonumber(setting(companion.rig, companion.assembly, "UnlockedKickAngularImpulseDeg", Config.UnlockedKickAngularImpulseDeg)) or Config.UnlockedKickAngularImpulseDeg
+		local kickMinSpeed = tonumber(setting(companion.rig, companion.assembly, "KickMinAngularSpeedDeg", Config.KickMinAngularSpeedDeg)) or Config.KickMinAngularSpeedDeg
+		local along = math.deg(companion.velocity) * sign
+		local launchedSpeed = math.max(kickMinSpeed, math.max(0, along) + kickImpulse)
+
+		companion.targetAngle = nil
+		companion.velocity = sign * math.rad(launchedSpeed)
+		companion.mode = "KickedOpen"
+		companion.kickBoostUntil = now + (tonumber(setting(companion.rig, companion.assembly, "KickBoostDuration", Config.KickBoostDuration)) or Config.KickBoostDuration)
+		companion.lastPushTime = now
+		companion.closeSoundArmed = true
+		broadcastAction(companion, "Kick", {
+			side = player and playerSideForLeaf(companion, player) or "Front",
+			sign = sign,
+			locked = false,
+			breaching = false,
+			paired = true,
+		})
+		setActive(companion)
+	end
+end
+
 function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
 	local state = assemblies[assembly]
 	if not state then
@@ -3069,6 +3103,9 @@ function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
 	if setting(leaf.rig, leaf.assembly, "KickOnlyWhenLocked", Config.KickOnlyWhenLocked) == true and not state.locked then
 		return
 	end
+	-- A seated double door behaves as one closed barrier for the initial impact. Once
+	-- either leaf is ajar or moving, later impacts remain isolated to the struck leaf.
+	local launchClosedAssembly = #state.leaves > 1 and allLeavesClosed(state)
 
 	beginLeafCommand(leaf)
 	table.clear(leaf.drivers)
@@ -3166,6 +3203,9 @@ function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
 		leaf.lastPushTime = os.clock()
 		leaf.closeSoundArmed = true
 		setActive(leaf)
+		if launchClosedAssembly then
+			launchClosedAssemblyCompanions(state, leaf, player)
+		end
 	end
 
 	if leaf.breached or not breakable or leaf.health > 0 then
@@ -3219,6 +3259,9 @@ function DoorService.Kick(assembly: Model, player: Player?, leafRig: Model?)
 	refreshAssemblyPublicState(state)
 	updatePromptText(state)
 	setActive(leaf)
+	if wasLocked and launchClosedAssembly then
+		launchClosedAssemblyCompanions(state, leaf, player)
+	end
 end
 
 function DoorService.BreakLeaf(leafRig: Model, player: Player?)

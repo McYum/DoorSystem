@@ -62,6 +62,8 @@ Doors.Command(workspace.MyDoor, "SetHealth", 50)
 
 `Doors.Control` is an alias of `Doors.Command`. Supported commands are `Open`,
 `Close`, `Lock`, `Unlock`, `ToggleLock`, `Kick`, `SetHealth`, and `Reset`.
+`Open` without a leaf opens every leaf in an assembly; pass a `LeafRig` as the fifth
+`Command` argument (or the third argument to `Doors.Open`) to target one leaf.
 
 For old requirement modules, put a ModuleScript named `DoorRequirementChecker` or
 `Checker` under the assembly/leaf (or `Requirements/Checker`). Existing `check` and
@@ -78,6 +80,14 @@ variants at `Sounds/KickAttempt` on the assembly/leaf to customize each door; th
 Studio demos use the sounds from
 `ReplicatedStorage.Miscs.MeleeSoundEffects.KickImpactSounds.Door`. Set
 `MeleeBreachEnabled=false` on an assembly to opt that door out.
+
+A kick or charge against a fully closed multi-leaf assembly launches all leaves. If
+any leaf is already open or moving, only the struck leaf reacts, so independently
+opened double doors remain independently kickable.
+
+Locking, unlocking, and trying a locked handle use separate `Sounds/Lock`,
+`Sounds/Unlock`, and `Sounds/Locked` categories. Each category can be either one
+`Sound` or a `Folder` of randomized Sound variants.
 
 Walking contact now yields the local collision proxy as soon as validated body
 contact is detected. At or above `SprintPushMinSpeed`, an unlocked closed door gets a
