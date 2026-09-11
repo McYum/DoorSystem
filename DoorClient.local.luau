@@ -12,7 +12,7 @@ local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
-local DOOR_SYSTEM_VERSION = "7.9.0"
+local DOOR_SYSTEM_VERSION = "7.9.1"
 -- Client configuration is inlined so DoorClient is self-contained.
 local Config = {
 	Version = DOOR_SYSTEM_VERSION,
@@ -38,6 +38,7 @@ local Config = {
 	PredictionDecay = 22,
 	LimitSpringRangeDeg = 16,
 	HandleEnabled = true,
+	HandleAnimateBothSides = true,
 	HandleAxis = "Z",
 	HandlePressDeg = -26,
 	HandleDamping = 0.78,
@@ -45,6 +46,12 @@ local Config = {
 	HandleReleaseDelay = 0.20,
 	LockedHandleJiggleDeg = 11,
 	LockedHandleJiggleDelay = 0.07,
+	LockIndicatorEnabled = true,
+	LockIndicatorAxis = "Z",
+	LockIndicatorUnlockedDeg = 0,
+	LockIndicatorLockedDeg = 90,
+	LockIndicatorDamping = 0.82,
+	LockIndicatorFrequency = 10,
 	LockedAttemptShakeDeg = 5.5,
 	LockedAttemptShakeFrequency = 29.0,
 	LockedAttemptShakeDamping = 0.08,
@@ -62,6 +69,12 @@ local Config = {
 	PushContactSurfaceGap = 1.48,
 	PushMaxLeadTime = 0.095,
 	PushLeadExtraGap = 0.52,
+	SprintPushMinSpeed = 20,
+	SprintPushPredictionTime = 0.20,
+	SprintPushSidePadding = 1.75,
+	SprintPushLeadExtraGap = 1.15,
+	SprintPushMaxLeadTime = 0.20,
+	SprintPushMinNormalIntent = 0.14,
 	LocalPushCollisionYield = true,
 	LocalPushCollisionYieldTime = 0.10,
 	LocalPushYieldMinNormalSpeed = 6,
@@ -148,6 +161,9 @@ export type ClientLeaf = {
 	lastAppliedAngle: number,
 	frontMotor: Motor6D?,
 	backMotor: Motor6D?,
+	lockFrontMotor: Motor6D?,
+	lockBackMotor: Motor6D?,
+	lockIndicatorState: boolean?,
 	promptAnchor: BasePart?,
 	promptOffset: CFrame?,
 	doorPrompt: ProximityPrompt?,
@@ -225,6 +241,13 @@ local function findHandleMotor(leafModel: Model, name: string): Motor6D?
 	return nil
 end
 
+local function axisTransform(axis: string, degrees: number): CFrame
+	local r = math.rad(degrees)
+	if axis == "Y" then return CFrame.Angles(0, r, 0) end
+	if axis == "Z" then return CFrame.Angles(0, 0, r) end
+	return CFrame.Angles(r, 0, 0)
+end
+
 local function setSourceHidden(leaf: ClientLeaf, hidden: boolean)
 	if hidden == leaf.sourceHidden then
 		return
@@ -253,8 +276,17 @@ local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean)
 	if leaf.backMotor then
 		UISpr.stop(leaf.backMotor)
 	end
+	if leaf.lockFrontMotor then
+		UISpr.stop(leaf.lockFrontMotor)
+	end
+	if leaf.lockBackMotor then
+		UISpr.stop(leaf.lockBackMotor)
+	end
 	leaf.frontMotor = nil
 	leaf.backMotor = nil
+	leaf.lockFrontMotor = nil
+	leaf.lockBackMotor = nil
+	leaf.lockIndicatorState = nil
 
 	if leaf.renderModel then
 		leaf.renderModel:Destroy()
@@ -325,6 +357,21 @@ local function ensureRenderModel(leaf: ClientLeaf): Model?
 	leaf.renderModel = clone
 	leaf.frontMotor = findHandleMotor(clone, "HandleFrontMotor")
 	leaf.backMotor = findHandleMotor(clone, "HandleBackMotor")
+	leaf.lockFrontMotor = findHandleMotor(clone, "LockFrontMotor")
+	leaf.lockBackMotor = findHandleMotor(clone, "LockBackMotor")
+	local assembly = findAssembly(leaf.rig)
+	local locked = assembly ~= nil and assembly:GetAttribute("Locked") == true
+	local lockAxis = tostring(setting(leaf.rig, assembly, "LockIndicatorAxis", Config.LockIndicatorAxis))
+	local lockDegrees = tonumber(setting(
+		leaf.rig,
+		assembly,
+		if locked then "LockIndicatorLockedDeg" else "LockIndicatorUnlockedDeg",
+		if locked then Config.LockIndicatorLockedDeg else Config.LockIndicatorUnlockedDeg
+	)) or (if locked then Config.LockIndicatorLockedDeg else Config.LockIndicatorUnlockedDeg)
+	local initialLockTransform = axisTransform(lockAxis, lockDegrees)
+	if leaf.lockFrontMotor then leaf.lockFrontMotor.Transform = initialLockTransform end
+	if leaf.lockBackMotor then leaf.lockBackMotor.Transform = initialLockTransform end
+	leaf.lockIndicatorState = locked
 	setSourceHidden(leaf, true)
 	return clone
 end
@@ -414,6 +461,9 @@ local function ensureLeaf(rig: Model): ClientLeaf?
 		lastAppliedAngle = math.huge,
 		frontMotor = nil,
 		backMotor = nil,
+		lockFrontMotor = nil,
+		lockBackMotor = nil,
+		lockIndicatorState = nil,
 		promptAnchor = nil,
 		promptOffset = nil,
 		doorPrompt = nil,
@@ -720,41 +770,66 @@ local function discoverAssembly(assembly: Model)
 	end
 end
 
-local function handleTransform(axis: string, degrees: number): CFrame
-	local r = math.rad(degrees)
-	if axis == "Y" then return CFrame.Angles(0, r, 0) end
-	if axis == "Z" then return CFrame.Angles(0, 0, r) end
-	return CFrame.Angles(r, 0, 0)
-end
-
 local function animateHandle(leaf: ClientLeaf, side: string, locked: boolean)
 	local assembly = findAssembly(leaf.rig)
 	if setting(leaf.rig, assembly, "HandleEnabled", Config.HandleEnabled) == false then return end
 	ensureRenderModel(leaf)
-	local motor = if side == "Back" then leaf.backMotor else leaf.frontMotor
-	if not motor then motor = leaf.frontMotor or leaf.backMotor end
-	if not motor then return end
+	local primary = if side == "Back" then leaf.backMotor else leaf.frontMotor
+	if not primary then primary = leaf.frontMotor or leaf.backMotor end
+	if not primary then return end
+	local motors = {primary}
+	if setting(leaf.rig, assembly, "HandleAnimateBothSides", Config.HandleAnimateBothSides) ~= false then
+		local other = if primary == leaf.frontMotor then leaf.backMotor else leaf.frontMotor
+		if other then table.insert(motors, other) end
+	end
 	local axis = tostring(setting(leaf.rig, assembly, "HandleAxis", Config.HandleAxis))
 	local pressDeg = tonumber(setting(leaf.rig, assembly, "HandlePressDeg", Config.HandlePressDeg)) or Config.HandlePressDeg
 	local damping = tonumber(setting(leaf.rig, assembly, "HandleDamping", Config.HandleDamping)) or Config.HandleDamping
 	local frequency = tonumber(setting(leaf.rig, assembly, "HandleFrequency", Config.HandleFrequency)) or Config.HandleFrequency
 	local releaseDelay = tonumber(setting(leaf.rig, assembly, "HandleReleaseDelay", Config.HandleReleaseDelay)) or Config.HandleReleaseDelay
 
-	UISpr.target(motor, damping, frequency, {Transform = handleTransform(axis, pressDeg)})
+	for _, motor in motors do
+		UISpr.target(motor, damping, frequency, {Transform = axisTransform(axis, pressDeg)})
+	end
 	if locked then
 		local jiggle = tonumber(setting(leaf.rig, assembly, "LockedHandleJiggleDeg", Config.LockedHandleJiggleDeg)) or Config.LockedHandleJiggleDeg
 		local jiggleDelay = tonumber(setting(leaf.rig, assembly, "LockedHandleJiggleDelay", Config.LockedHandleJiggleDelay)) or Config.LockedHandleJiggleDelay
 		task.delay(jiggleDelay, function()
-			if motor.Parent then
-				UISpr.target(motor, 0.68, frequency * 1.2, {Transform = handleTransform(axis, pressDeg + jiggle)})
+			for _, motor in motors do
+				if motor.Parent then
+					UISpr.target(motor, 0.68, frequency * 1.2, {Transform = axisTransform(axis, pressDeg + jiggle)})
+				end
 			end
 		end)
 	end
 	task.delay(releaseDelay, function()
-		if motor.Parent then
-			UISpr.target(motor, damping, frequency, {Transform = CFrame.identity})
+		for _, motor in motors do
+			if motor.Parent then
+				UISpr.target(motor, damping, frequency, {Transform = CFrame.identity})
+			end
 		end
 	end)
+end
+
+local function refreshLockIndicator(leaf: ClientLeaf, assembly: Model?)
+	if not assembly or setting(leaf.rig, assembly, "LockIndicatorEnabled", Config.LockIndicatorEnabled) == false then
+		return
+	end
+	local locked = assembly:GetAttribute("Locked") == true
+	if leaf.lockIndicatorState == locked then return end
+	leaf.lockIndicatorState = locked
+	local axis = tostring(setting(leaf.rig, assembly, "LockIndicatorAxis", Config.LockIndicatorAxis))
+	local degrees = tonumber(setting(
+		leaf.rig,
+		assembly,
+		if locked then "LockIndicatorLockedDeg" else "LockIndicatorUnlockedDeg",
+		if locked then Config.LockIndicatorLockedDeg else Config.LockIndicatorUnlockedDeg
+	)) or (if locked then Config.LockIndicatorLockedDeg else Config.LockIndicatorUnlockedDeg)
+	local damping = tonumber(setting(leaf.rig, assembly, "LockIndicatorDamping", Config.LockIndicatorDamping)) or Config.LockIndicatorDamping
+	local frequency = tonumber(setting(leaf.rig, assembly, "LockIndicatorFrequency", Config.LockIndicatorFrequency)) or Config.LockIndicatorFrequency
+	local transform = axisTransform(axis, degrees)
+	if leaf.lockFrontMotor then UISpr.target(leaf.lockFrontMotor, damping, frequency, {Transform = transform}) end
+	if leaf.lockBackMotor then UISpr.target(leaf.lockBackMotor, damping, frequency, {Transform = transform}) end
 end
 
 local function collectLocalSoundCandidates(container: Instance?, name: string): {Sound}
@@ -1218,6 +1293,11 @@ local function scanLocalPushIntent(now: number)
 	if movement.Magnitude < 0.65 then
 		return
 	end
+	local character = localHumanoid.Parent
+	local values = character and character:FindFirstChild("Values")
+	local sprintFolder = values and values:FindFirstChild("SprintHandler")
+	local sprintValue = sprintFolder and sprintFolder:FindFirstChild("Sprinting")
+	local sprintFlag = sprintValue ~= nil and sprintValue:IsA("BoolValue") and sprintValue.Value == true
 
 	for _, leaf in pushLeaves do
 		if leaf.broken then
@@ -1246,11 +1326,19 @@ local function scanLocalPushIntent(now: number)
 
 		local cf = collision.CFrame
 		local half = collision.Size * 0.5
+		local sprintMinSpeed = tonumber(setting(leaf.rig, assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
+		local sprintApproach = sprintFlag or movement.Magnitude >= sprintMinSpeed
 		local predictionTime = Config.PushPredictionTime or 0.07
+		if sprintApproach then
+			predictionTime = math.max(predictionTime, tonumber(setting(leaf.rig, assembly, "SprintPushPredictionTime", Config.SprintPushPredictionTime)) or Config.SprintPushPredictionTime)
+		end
 		local currentLocal = cf:PointToObjectSpace(localRoot.Position)
 		local futureLocal = cf:PointToObjectSpace(localRoot.Position + movement * predictionTime)
 		local localVelocity = cf:VectorToObjectSpace(movement)
 		local sidePadding = Config.PushSidePadding or 0.72
+		if sprintApproach then
+			sidePadding = math.max(sidePadding, tonumber(setting(leaf.rig, assembly, "SprintPushSidePadding", Config.SprintPushSidePadding)) or Config.SprintPushSidePadding)
+		end
 		local lateralOk = math.abs(currentLocal.X) <= half.X + sidePadding
 			or math.abs(futureLocal.X) <= half.X + sidePadding
 		local heightOk = math.abs(currentLocal.Y) <= half.Y + 0.70
@@ -1259,7 +1347,10 @@ local function scanLocalPushIntent(now: number)
 			then localHumanoid.MoveDirection.Unit
 			else movement.Unit
 		local inputLocal = cf:VectorToObjectSpace(inputWorld)
-		local movingToward = currentLocal.Z * inputLocal.Z < -0.045
+		local normalIntent = math.abs(inputLocal.Z)
+		local minNormalIntent = tonumber(setting(leaf.rig, assembly, "SprintPushMinNormalIntent", Config.SprintPushMinNormalIntent)) or Config.SprintPushMinNormalIntent
+		local movingToward = currentLocal.Z * inputLocal.Z < (if sprintApproach then -0.006 else -0.045)
+			and (not sprintApproach or normalIntent >= minNormalIntent)
 
 		-- Use distance to the actual slab surface, not a broad proximity volume.
 		-- For an R15 character the root can remain about one stud away when the body
@@ -1269,9 +1360,15 @@ local function scanLocalPushIntent(now: number)
 		local contactGap = Config.PushContactSurfaceGap or 1.15
 		local normalSpeed = math.abs(localVelocity.Z)
 		local timeToSurface = if normalSpeed > 0.05 then surfaceGap / normalSpeed else math.huge
-		local imminent = timeToSurface <= (Config.PushMaxLeadTime or 0.11)
+		local maxLead = Config.PushMaxLeadTime or 0.11
+		local leadExtra = Config.PushLeadExtraGap or 0.42
+		if sprintApproach then
+			maxLead = math.max(maxLead, tonumber(setting(leaf.rig, assembly, "SprintPushMaxLeadTime", Config.SprintPushMaxLeadTime)) or Config.SprintPushMaxLeadTime)
+			leadExtra = math.max(leadExtra, tonumber(setting(leaf.rig, assembly, "SprintPushLeadExtraGap", Config.SprintPushLeadExtraGap)) or Config.SprintPushLeadExtraGap)
+		end
+		local imminent = timeToSurface <= maxLead
 			and futureGap < surfaceGap
-			and surfaceGap <= contactGap + (Config.PushLeadExtraGap or 0.42)
+			and surfaceGap <= contactGap + leadExtra
 		local touchingRange = surfaceGap <= contactGap
 
 		if lateralOk and heightOk and movingToward and (touchingRange or imminent) then
@@ -1314,6 +1411,7 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	local renderModel = ensureRenderModel(leaf)
 	if not renderModel then return end
 	local assembly = findAssembly(leaf.rig)
+	refreshLockIndicator(leaf, assembly)
 	local localNow = os.clock()
 	local pendingPush = localPushStates[leaf.rig]
 	local lockedForPush = assembly and assembly:GetAttribute("Locked") == true

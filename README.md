@@ -42,6 +42,26 @@ The Studio demo uses authored Tool instances at
 `ServerScriptService.ItemTemplates.DoorKeys.Door_Key_Demo` and
 `StarterPack.Door_Key_Demo`; it does not generate the key from a runtime script.
 
+State attributes such as `DoorState`, `Open`, `Closed`, `Locked`, and `Health` are
+runtime readbacks. For attribute-driven server commands, write `RequestedState`
+(`Open`, `Closed`, `Locked`, or `Unlocked`), `RequestedLocked` (boolean), or
+`RequestedHealth` (number). The easiest live Studio control is `DoorCommand`: enter
+`Open`, `Close`, `Lock`, `Unlock`, `ToggleLock`, `Kick`, or `Reset`; it clears itself
+after handling so the same command can be used repeatedly. Server code can alternatively call `DoorService.Open`,
+`Close`, `SetLocked`, `SetState`, or `SetHealth` directly. Authored initial
+`DoorState`/`Open`/`Closed`/`Locked` values are still honored when a door registers.
+For a single stable entry point, synced server scripts can use:
+
+```luau
+local Doors = require(game.ServerScriptService.Scripts.DoorSystem.DoorService)
+Doors.Command(workspace.MyDoor, "Open")
+Doors.Command(workspace.MyDoor, "Lock")
+Doors.Command(workspace.MyDoor, "SetHealth", 50)
+```
+
+`Doors.Control` is an alias of `Doors.Command`. Supported commands are `Open`,
+`Close`, `Lock`, `Unlock`, `ToggleLock`, `Kick`, `SetHealth`, and `Reset`.
+
 For old requirement modules, put a ModuleScript named `DoorRequirementChecker` or
 `Checker` under the assembly/leaf (or `Requirements/Checker`). Existing `check` and
 `checkserver` table APIs are supported. New checkers can expose
@@ -61,4 +81,12 @@ Studio demos use the sounds from
 Walking contact now yields the local collision proxy as soon as validated body
 contact is detected. At or above `SprintPushMinSpeed`, an unlocked closed door gets a
 kick-like launch without taking durability damage. All sprint values can be changed
-per door through attributes or `DoorConfig`.
+per door through attributes or `DoorConfig`. Sprint approaches use a longer swept
+contact window and side padding, so diagonal runs that genuinely cross the slab are
+accepted without treating near-tangential movement as an impact.
+
+Both authored handles animate together by default (`HandleAnimateBothSides`) so the
+movement is visible from either face. An optional `LockFrontMotor` and
+`LockBackMotor` can drive authored thumbturn models between
+`LockIndicatorUnlockedDeg` and `LockIndicatorLockedDeg`. The two lockable Studio
+demos include persistent `LockVisual` models with these roots and motors.

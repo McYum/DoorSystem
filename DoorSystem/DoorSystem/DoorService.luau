@@ -1434,16 +1434,15 @@ local function setAttributeIfDifferent(inst: Instance, name: string, value: any)
 end
 
 local function writeAssemblyAttribute(state: AssemblyState, name: string, value: any)
+	-- Keep the guard aligned with the latest public state even when the Instance
+	-- already has that value. Roblox may deliver an older SetAttribute signal on a
+	-- later deferred cycle; leaving the previous published value here would make
+	-- that system-authored signal look external and recursively issue a command.
+	state.lastPublishedAttributes[name] = value
 	if state.model:GetAttribute(name) == value then
 		return
 	end
-	state.lastPublishedAttributes[name] = value
 	state.model:SetAttribute(name, value)
-end
-
-local function consumeSystemAttributeChange(state: AssemblyState, name: string): boolean
-	local published = state.lastPublishedAttributes[name]
-	return published ~= nil and state.model:GetAttribute(name) == published
 end
 
 local function assemblyActuallyOpen(state: AssemblyState): boolean
@@ -1531,84 +1530,51 @@ end
 
 local function connectAssemblyAttributeControls(state: AssemblyState)
 	local assembly = state.model
-	local function connect(name: string, callback: () -> ())
+	local function connect(name: string, callback: (any) -> ())
 		table.insert(state.attributeConnections, assembly:GetAttributeChangedSignal(name):Connect(function()
-			if consumeSystemAttributeChange(state, name) then
-				return
-			end
-			callback()
+			callback(assembly:GetAttribute(name))
 		end))
 	end
+	local function clearStringRequest(name: string, handledValue: any)
+		task.defer(function()
+			if assembly.Parent and assembly:GetAttribute(name) == handledValue then
+				assembly:SetAttribute(name, "")
+			end
+		end)
+	end
 
-	connect("Locked", function()
-		DoorService.SetLocked(assembly, assembly:GetAttribute("Locked") == true, nil, true)
-	end)
-
-	-- Persistent state booleans are genuine two-way controls when another server
-	-- script writes them. System-authored readback changes are consumed above.
-	--   Open=true / Closed=false  -> force Open
-	--   Open=false / Closed=true  -> force Close
-	connect("Open", function()
-		if assembly:GetAttribute("Open") == true then
-			DoorService.Open(assembly)
-		else
-			DoorService.Close(assembly)
+	-- DoorState/Open/Closed/Locked/Health are public readbacks. Listening to those
+	-- same attributes as commands is unsafe with Roblox's deferred signal behavior:
+	-- a queued readback event can arrive after a newer value and recursively reverse
+	-- the current command. Dedicated request attributes preserve attribute-driven
+	-- integrations without making our own replication feed back into the service.
+	connect("RequestedLocked", function(requested)
+		if type(requested) == "boolean" then
+			DoorService.SetLocked(assembly, requested, nil, true)
 		end
 	end)
-	connect("Opened", function()
-		if assembly:GetAttribute("Opened") == true then
-			DoorService.Open(assembly)
-		else
-			DoorService.Close(assembly)
-		end
-	end)
-	connect("Closed", function()
-		if assembly:GetAttribute("Closed") == true then
-			DoorService.Close(assembly)
-		else
-			DoorService.Open(assembly)
-		end
-	end)
-
-	-- Opening/Closing are transient readouts too, so only true is interpreted as a
-	-- command. False simply means that transient phase ended.
-	connect("Opening", function()
-		if assembly:GetAttribute("Opening") == true then DoorService.Open(assembly) end
-	end)
-	connect("Closing", function()
-		if assembly:GetAttribute("Closing") == true then DoorService.Close(assembly) end
-	end)
-	connect("DoorState", function()
-		local requested = string.lower(tostring(assembly:GetAttribute("DoorState") or ""))
-		if requested == "open" or requested == "opened" or requested == "opening" then
-			DoorService.Open(assembly)
-		elseif requested == "closed" or requested == "close" or requested == "closing" then
-			DoorService.Close(assembly)
-		elseif requested == "locked" then
-			DoorService.SetLocked(assembly, true, nil, true)
-		elseif requested == "unlocked" or requested == "unlock" then
-			DoorService.SetLocked(assembly, false, nil, true)
-		end
-	end)
-
-	connect("TargetState", function()
-		local requested = tostring(assembly:GetAttribute("TargetState") or "")
+	connect("RequestedState", function(requested)
+		requested = tostring(requested or "")
 		if requested ~= "" then
 			DoorService.SetState(assembly, requested)
+			clearStringRequest("RequestedState", requested)
 		end
 	end)
-
-	-- Health is both a replicated readout and a server-writable control. A script can
-	-- damage/repair all leaves with door:SetAttribute("Health", value). System writes
-	-- are consumed by the same guard used by the state attributes above.
-	connect("Health", function()
-		local requested = tonumber(assembly:GetAttribute("Health"))
+	connect("DoorCommand", function(requested)
+		requested = tostring(requested or "")
+		if requested ~= "" then
+			DoorService.Command(assembly, requested)
+			clearStringRequest("DoorCommand", requested)
+		end
+	end)
+	connect("RequestedHealth", function(requested)
+		requested = tonumber(requested)
 		if requested ~= nil then
 			DoorService.SetHealth(assembly, requested)
 		end
 	end)
 
-	connect("MaxHealth", function()
+	connect("MaxHealth", function(_requested)
 		-- Live MaxHealth changes never silently heal; they only clamp current integrity.
 		for _, leaf in state.leaves do
 			local maxHealth = math.max(0, tonumber(setting(leaf.rig, assembly, "MaxHealth", Config.MaxHealth)) or Config.MaxHealth)
@@ -1651,17 +1617,29 @@ local DEFAULT_CONFIGURATION_ATTRIBUTES = table.freeze({
 	"SprintPushBoostDuration",
 	"SprintPushPlaysImpactSound",
 	"SprintPushAddsKickShake",
+	"SprintPushPredictionTime",
+	"SprintPushSidePadding",
+	"SprintPushLeadExtraGap",
+	"SprintPushMaxLeadTime",
+	"SprintPushMinNormalIntent",
 	"MaxAngularSpeedDeg",
 	"ReturnStiffness",
 	"ReturnDamping",
 	"SafetyEnabled",
 	"HandleEnabled",
+	"HandleAnimateBothSides",
 	"WalkPushHandleEnabled",
 	"WalkPushHandlePlaysSound",
 	"HandlePressDeg",
 	"HandleDoorDelay",
 	"LockedHandleJiggleDeg",
 	"LockedHandleJiggleDelay",
+	"LockIndicatorEnabled",
+	"LockIndicatorAxis",
+	"LockIndicatorUnlockedDeg",
+	"LockIndicatorLockedDeg",
+	"LockIndicatorDamping",
+	"LockIndicatorFrequency",
 	"LockPromptEnabled",
 	"AllowPlayerLocking",
 	"LockType",
@@ -1810,6 +1788,10 @@ function DoorService.Register(assembly: Model): AssemblyState?
 	if assembly:GetAttribute("LockBroken") == nil then
 		assembly:SetAttribute("LockBroken", false)
 	end
+	-- Visible, reusable live-control fields for designers. String commands reset to
+	-- blank after handling, so entering the same command twice still fires twice.
+	if assembly:GetAttribute("DoorCommand") == nil then assembly:SetAttribute("DoorCommand", "") end
+	if assembly:GetAttribute("RequestedState") == nil then assembly:SetAttribute("RequestedState", "") end
 	connectAssemblyAttributeControls(state)
 	refreshAssemblyPublicState(state)
 	updatePromptText(state)
@@ -1850,12 +1832,20 @@ local function virtualInertia(leaf: LeafState): number
 	return math.max(0.05, (mass * width * width) / 3)
 end
 
+local function playerIsSprinting(player: Player): boolean
+	local characterValues = player.Character and player.Character:FindFirstChild("Values")
+	local sprintFolder = characterValues and characterValues:FindFirstChild("SprintHandler")
+	local sprintValue = sprintFolder and sprintFolder:FindFirstChild("Sprinting")
+	return sprintValue ~= nil and sprintValue:IsA("BoolValue") and sprintValue.Value == true
+end
+
 local function computePushContact(
 	leaf: LeafState,
 	position: Vector3,
 	movement: Vector3,
 	moveDirection: Vector3,
-	strictContact: boolean
+	strictContact: boolean,
+	sprintApproach: boolean?
 ): (boolean, number, number, number, number)
 	local movePlanar = movement * Vector3.new(1, 0, 1)
 	local intentPlanar = moveDirection * Vector3.new(1, 0, 1)
@@ -1879,6 +1869,12 @@ local function computePushContact(
 	local heightPadding = tonumber(setting(leaf.rig, leaf.assembly, "ContactHeightPadding", Config.ContactHeightPadding)) or Config.ContactHeightPadding
 	local contactGap = tonumber(setting(leaf.rig, leaf.assembly, "PushContactSurfaceGap", Config.PushContactSurfaceGap)) or Config.PushContactSurfaceGap
 	local maxLeadTime = tonumber(setting(leaf.rig, leaf.assembly, "PushMaxLeadTime", Config.PushMaxLeadTime)) or Config.PushMaxLeadTime
+	if sprintApproach then
+		predictionTime = math.max(predictionTime, tonumber(setting(leaf.rig, leaf.assembly, "SprintPushPredictionTime", Config.SprintPushPredictionTime)) or Config.SprintPushPredictionTime)
+		sidePadding = math.max(sidePadding, tonumber(setting(leaf.rig, leaf.assembly, "SprintPushSidePadding", Config.SprintPushSidePadding)) or Config.SprintPushSidePadding)
+		pushLeadExtraGap = math.max(pushLeadExtraGap, tonumber(setting(leaf.rig, leaf.assembly, "SprintPushLeadExtraGap", Config.SprintPushLeadExtraGap)) or Config.SprintPushLeadExtraGap)
+		maxLeadTime = math.max(maxLeadTime, tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMaxLeadTime", Config.SprintPushMaxLeadTime)) or Config.SprintPushMaxLeadTime)
+	end
 
 	local currentLocal = cf:PointToObjectSpace(position)
 	local futureLocal = cf:PointToObjectSpace(position + movePlanar * predictionTime)
@@ -1897,7 +1893,9 @@ local function computePushContact(
 	local futureGap = math.max(0, math.abs(futureLocal.Z) - half.Z)
 	local normalIntent = math.abs(localIntent.Z)
 	local normalSpeed = math.max(math.abs(localVelocity.Z), movePlanar.Magnitude * normalIntent * 0.72)
-	local movingToward = currentLocal.Z * localIntent.Z < -0.018
+	local minNormalIntent = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinNormalIntent", Config.SprintPushMinNormalIntent)) or Config.SprintPushMinNormalIntent
+	local movingToward = currentLocal.Z * localIntent.Z < (if sprintApproach then -0.006 else -0.018)
+		and (not sprintApproach or normalIntent >= minNormalIntent)
 	local timeToSurface = if normalSpeed > 0.05 then surfaceGap / normalSpeed else math.huge
 	local touchingRange = surfaceGap <= contactGap
 	local imminent = timeToSurface <= maxLeadTime
@@ -1967,7 +1965,10 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 
 	local movement = sample.velocity * Vector3.new(1, 0, 1)
 	local moveDirection = sample.moveDirection * Vector3.new(1, 0, 1)
-	local accepted, signedLever, normalSpeed, surfaceGap, contactFactor = computePushContact(leaf, sample.position, movement, moveDirection, clientAssisted == true)
+	local isSprinting = playerIsSprinting(sample.player)
+	local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
+	local sprintApproach = isSprinting or movement.Magnitude >= sprintMinSpeed
+	local accepted, signedLever, normalSpeed, surfaceGap, contactFactor = computePushContact(leaf, sample.position, movement, moveDirection, clientAssisted == true, sprintApproach)
 	if not accepted then
 		return false
 	end
@@ -2018,11 +2019,6 @@ local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number
 	local intendedNormalSpeed = if moveIntent.Magnitude > 0.05
 		then sample.humanoid.WalkSpeed * math.abs(currentCF.LookVector:Dot(moveIntent.Unit))
 		else 0
-	local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
-	local characterValues = sample.player.Character and sample.player.Character:FindFirstChild("Values")
-	local sprintFolder = characterValues and characterValues:FindFirstChild("SprintHandler")
-	local sprintValue = sprintFolder and sprintFolder:FindFirstChild("Sprinting")
-	local isSprinting = sprintValue ~= nil and sprintValue:IsA("BoolValue") and sprintValue.Value == true
 	local approachSpeed = math.max(normalSpeed, intendedNormalSpeed, if isSprinting then sample.humanoid.WalkSpeed else 0)
 	local sprintClosedAngle = math.rad(tonumber(setting(leaf.rig, leaf.assembly, "SprintPushClosedAngleDeg", Config.SprintPushClosedAngleDeg)) or Config.SprintPushClosedAngleDeg)
 	local sprintLaunch = firstContact
@@ -2128,7 +2124,9 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 
 		local movement = root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
 		local moveDirection = humanoid.MoveDirection * Vector3.new(1, 0, 1)
-		local accepted, signedLever, normalSpeed, _, contactFactor = computePushContact(leaf, root.Position, movement, moveDirection, true)
+		local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
+		local sprintApproach = playerIsSprinting(player) or movement.Magnitude >= sprintMinSpeed
+		local accepted, signedLever, normalSpeed, _, contactFactor = computePushContact(leaf, root.Position, movement, moveDirection, true, sprintApproach)
 		if not accepted then
 			continue
 		end
@@ -2994,6 +2992,39 @@ function DoorService.SetState(assembly: Model, stateName: string)
 		warn(("[DoorService] Unknown state %q for %s"):format(stateName, assembly:GetFullName()))
 	end
 end
+
+-- Stable one-call control surface for other synced server systems. Example:
+-- DoorService.Command(door, "Lock") or DoorService.Command(door, "SetHealth", 50).
+function DoorService.Command(assembly: Model, command: string, value: any?, player: Player?, leafRig: Model?): (boolean, string?)
+	if not assembly or not assembly:IsA("Model") then
+		return false, "InvalidDoor"
+	end
+	local normalized = string.lower(tostring(command)):gsub("[%s_%-]", "")
+	if normalized == "open" then
+		DoorService.Open(assembly, player, leafRig)
+	elseif normalized == "close" then
+		DoorService.Close(assembly)
+	elseif normalized == "lock" then
+		DoorService.SetLocked(assembly, true, player, player == nil)
+	elseif normalized == "unlock" then
+		DoorService.SetLocked(assembly, false, player, player == nil)
+	elseif normalized == "togglelock" then
+		return DoorService.ToggleLock(assembly, player, leafRig), nil
+	elseif normalized == "kick" or normalized == "breach" then
+		DoorService.Kick(assembly, player, leafRig)
+	elseif normalized == "sethealth" or normalized == "health" then
+		local health = tonumber(value)
+		if health == nil then return false, "InvalidHealth" end
+		DoorService.SetHealth(assembly, health, leafRig)
+	elseif normalized == "reset" then
+		DoorService.Reset(assembly)
+	else
+		return false, "UnknownCommand"
+	end
+	return true, nil
+end
+
+DoorService.Control = DoorService.Command
 
 function DoorService.ToggleLock(assembly: Model, player: Player?, leafRig: Model?): boolean
 	local state = assemblies[assembly] or DoorService.Register(assembly)

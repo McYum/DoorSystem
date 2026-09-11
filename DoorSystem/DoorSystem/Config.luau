@@ -4,8 +4,8 @@
 -- All values can be overridden with Attributes on the top-level assembly or LeafRig.
 
 return table.freeze({
-	Version = "7.9.0",
-	VersionName = "DoorSystem v7.9",
+	Version = "7.9.1",
+	VersionName = "DoorSystem v7.9.1",
 	Tag = "DoorSystemDoor",
 	RemotesFolderName = "DoorSystemRemotes",
 
@@ -100,6 +100,13 @@ return table.freeze({
 	SprintPushBoostDuration = 0.45,
 	SprintPushPlaysImpactSound = true,
 	SprintPushAddsKickShake = true,
+	-- Angled sprint approaches get a longer swept-contact window and a slightly
+	-- wider avatar allowance, while still requiring meaningful movement into the slab.
+	SprintPushPredictionTime = 0.20,
+	SprintPushSidePadding = 1.75,
+	SprintPushLeadExtraGap = 1.15,
+	SprintPushMaxLeadTime = 0.20,
+	SprintPushMinNormalIntent = 0.14,
 	-- Preserve the approach speed for a fraction of a second after the avatar hits the
 	-- solid slab. Otherwise Roblox collision can zero AssemblyLinearVelocity and make
 	-- sprinting paradoxically push LESS than walking.
@@ -182,7 +189,9 @@ return table.freeze({
 
 	-- Public state attributes are also external server controls.
 	-- Open=true / Closed=false force Open; Open=false / Closed=true force Close.
-	-- Locked=true/false and DoorState = "Open"/"Closed"/"Locked"/"Unlocked"
+	-- Initial Locked/Open/Closed/DoorState values are honored at registration.
+	-- At runtime use RequestedLocked / RequestedState / RequestedHealth attributes,
+	-- or the DoorService API; state/readback attributes remain output-only.
 	-- are also authoritative commands. System-authored readback writes are guarded.
 	-- Stable public-state hysteresis shared by state attributes, prompt text,
 	-- collision settling and transition audio.
@@ -256,6 +265,7 @@ return table.freeze({
 
 	-- Handle animation
 	HandleEnabled = true,
+	HandleAnimateBothSides = true,
 	-- A closed door pushed by walking into it depresses the handle once as contact opens
 	-- the leaf. This is presentation-only and does not alter push physics.
 	WalkPushHandleEnabled = true,
@@ -273,6 +283,13 @@ return table.freeze({
 	HandleDoorDelay = 0.085,
 	LockedHandleJiggleDeg = 11,
 	LockedHandleJiggleDelay = 0.07,
+	-- Optional authored LockFrontMotor / LockBackMotor thumbturn indicators.
+	LockIndicatorEnabled = true,
+	LockIndicatorAxis = "Z",
+	LockIndicatorUnlockedDeg = 0,
+	LockIndicatorLockedDeg = 90,
+	LockIndicatorDamping = 0.82,
+	LockIndicatorFrequency = 10,
 	-- Locked open attempts are presentation-only by default. The authoritative hinge
 	-- remains seated/solid while the client renders a visible torsional rattle.
 	LockedAttemptAuthoritativeMotion = false,
