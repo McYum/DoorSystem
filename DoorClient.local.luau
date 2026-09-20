@@ -420,6 +420,11 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 	proxy.CanCollide = leaf.collisionEnabled
 	proxy.CanTouch = false
 	proxy.CanQuery = false
+	-- This private slab exists only to give the local character frame-accurate
+	-- collision. CanQuery cannot exclude a part while CanCollide is enabled, so use
+	-- the projectile system's generic pass-through contract to keep bullets from
+	-- striking this invisible duplicate instead of the authoritative DoorCollision.
+	proxy:SetAttribute("PassAnyways", true)
 	proxy.CastShadow = false
 	proxy.Massless = true
 	proxy.CollisionGroup = source.CollisionGroup
