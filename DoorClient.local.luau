@@ -139,6 +139,7 @@ export type ClientLeaf = {
 	leafModel: Model,
 	renderModel: Model?,
 	sourceLocalTransparency: {[BasePart]: number},
+	sourceCanQuery: {[BasePart]: boolean},
 	sourceHidden: boolean,
 	collision: BasePart?,
 	localCollision: BasePart?,
@@ -258,10 +259,21 @@ local function setSourceHidden(leaf: ClientLeaf, hidden: boolean)
 				if leaf.sourceLocalTransparency[descendant] == nil then
 					leaf.sourceLocalTransparency[descendant] = descendant.LocalTransparencyModifier
 				end
+				if leaf.sourceCanQuery[descendant] == nil then
+					leaf.sourceCanQuery[descendant] = descendant.CanQuery
+				end
 				descendant.LocalTransparencyModifier = 1
+				-- The replicated source leaf stays at the authored/server pose while the
+				-- visible clone is reconstructed locally. Never let local raycasts hit
+				-- that hidden geometry; DoorCollision remains the authoritative query target.
+				descendant.CanQuery = false
 			else
 				local original = leaf.sourceLocalTransparency[descendant]
 				descendant.LocalTransparencyModifier = if original ~= nil then original else 0
+				local originalCanQuery = leaf.sourceCanQuery[descendant]
+				if originalCanQuery ~= nil then
+					descendant.CanQuery = originalCanQuery
+				end
 			end
 		end
 	end
@@ -300,6 +312,8 @@ local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean)
 	-- proxy is no longer being used. Do not force it on for a legacy broken leaf.
 	if leaf.collision and leaf.collision.Parent and not leaf.broken and leaf.sourceCollisionCanCollide ~= nil then
 		leaf.collision.CanCollide = leaf.sourceCollisionCanCollide
+		leaf.collision.Transparency = 1
+		leaf.collision.LocalTransparencyModifier = 0
 	end
 
 	if showSource then
@@ -381,7 +395,14 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 	end
 	if leaf.localCollision and leaf.localCollision.Parent then
 		if leaf.collision and leaf.collision.Parent then
+			-- Keep the replicated collider queryable for bullets while the private
+			-- collision mirror owns local character physics. Some projectile handlers
+			-- skip fully-transparent non-collidable parts based on Transparency, so hide
+			-- this locally with LocalTransparencyModifier instead.
+			leaf.collision.Transparency = 0
+			leaf.collision.LocalTransparencyModifier = 1
 			leaf.collision.CanCollide = false
+			leaf.collision.CanQuery = true
 		end
 		return leaf.localCollision
 	end
@@ -408,8 +429,11 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 	leaf.sourceCollisionCanCollide = source.CanCollide
 	-- The authoritative slab remains solid on the server. Locally we disable only
 	-- that replicated copy so the player collides with the exact render-frame proxy
-	-- instead of a stale server CFrame. This is client presentation/character physics
-	-- alignment; it never changes server authority.
+	-- instead of a stale server CFrame. Keep it queryable as the replicated ballistic
+	-- surface, but hide it locally without reporting Transparency = 1 to projectile code.
+	source.Transparency = 0
+	source.LocalTransparencyModifier = 1
+	source.CanQuery = true
 	source.CanCollide = false
 	leaf.localCollision = proxy
 	return proxy
@@ -438,6 +462,7 @@ local function ensureLeaf(rig: Model): ClientLeaf?
 		leafModel = leafModel,
 		renderModel = nil,
 		sourceLocalTransparency = {},
+		sourceCanQuery = {},
 		sourceHidden = false,
 		collision = collision,
 		localCollision = nil,
@@ -1146,6 +1171,8 @@ local function destroyLocalInteractionProxies(leaf: ClientLeaf)
 	end
 	if leaf.collision and leaf.collision.Parent and not leaf.broken and leaf.sourceCollisionCanCollide ~= nil then
 		leaf.collision.CanCollide = leaf.sourceCollisionCanCollide
+		leaf.collision.Transparency = 1
+		leaf.collision.LocalTransparencyModifier = 0
 	end
 	leaf.sourceCollisionCanCollide = nil
 	leaf.localCollisionYieldUntil = 0
@@ -1606,6 +1633,12 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	end
 	local localCollision = ensureLocalCollisionMirror(leaf)
 	if localCollision and leaf.hingeToCollision then
+		-- While the replicated slab is non-collidable locally, keep its query pose on
+		-- the exact authoritative visual angle so client-side bullets cannot hit a stale
+		-- invisible closed-door position.
+		if leaf.collision and leaf.collision.Parent then
+			leaf.collision.CFrame = baseHingeRotation * leaf.hingeToCollision
+		end
 		localCollision.CFrame = baseHingeRotation * leaf.hingeToCollision
 
 		-- Per-player hybrid collision: only THIS client can yield its private proxy while
