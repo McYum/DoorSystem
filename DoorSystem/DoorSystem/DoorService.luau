@@ -277,7 +277,7 @@ local DEFAULT_SOUND_BANK: {[string]: DefaultSoundDefinition} = table.freeze({
 })
 
 local function configureGeneratedSound(sound: Sound, soundId: string, volume: number, assembly: Model)
-	if not sound.SoundGroup then sound.SoundGroup = game.SoundService.MainOut end
+	if not sound.SoundGroup then sound.SoundGroup = game.SoundService.Main end
 	sound.SoundId = soundId
 	sound.Volume = volume
 	sound.RollOffMode = Enum.RollOffMode.InverseTapered
