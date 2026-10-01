@@ -602,6 +602,7 @@ local function getOrCreateCollision(leafRig: Model, leafModel: Model): BasePart
 		existing.Transparency = 1
 		existing.CanTouch = false
 		existing.CanQuery = true
+		existing:SetAttribute("DoorProjectileSurface", true)
 		existing.CanCollide = true
 		return existing
 	end
@@ -614,6 +615,7 @@ local function getOrCreateCollision(leafRig: Model, leafModel: Model): BasePart
 		collision.Anchored = true
 		collision.CanTouch = false
 		collision.CanQuery = true
+		collision:SetAttribute("DoorProjectileSurface", true)
 		collision.CanCollide = true
 		collision.Parent = leafRig
 		template.CanCollide = false
@@ -636,6 +638,7 @@ local function getOrCreateCollision(leafRig: Model, leafModel: Model): BasePart
 	collision.Transparency = 1
 	collision.CanTouch = false
 	collision.CanQuery = true
+	collision:SetAttribute("DoorProjectileSurface", true)
 	collision.CanCollide = true
 	collision.Parent = leafRig
 	return collision

@@ -312,6 +312,7 @@ local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean)
 	-- proxy is no longer being used. Do not force it on for a legacy broken leaf.
 	if leaf.collision and leaf.collision.Parent and not leaf.broken and leaf.sourceCollisionCanCollide ~= nil then
 		leaf.collision.CanCollide = leaf.sourceCollisionCanCollide
+		leaf.collision.CanQuery = true
 		leaf.collision.Transparency = 1
 		leaf.collision.LocalTransparencyModifier = 0
 	end
@@ -402,7 +403,7 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 			leaf.collision.Transparency = 0
 			leaf.collision.LocalTransparencyModifier = 1
 			leaf.collision.CanCollide = false
-			leaf.collision.CanQuery = true
+			leaf.collision.CanQuery = false
 		end
 		return leaf.localCollision
 	end
@@ -419,12 +420,12 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 	proxy.Transparency = 1
 	proxy.CanCollide = leaf.collisionEnabled
 	proxy.CanTouch = false
-	proxy.CanQuery = false
-	-- This private slab exists only to give the local character frame-accurate
-	-- collision. CanQuery cannot exclude a part while CanCollide is enabled, so use
-	-- the projectile system's generic pass-through contract to keep bullets from
-	-- striking this invisible duplicate instead of the authoritative DoorCollision.
-	proxy:SetAttribute("PassAnyways", true)
+	proxy.CanQuery = true
+	-- The mirror follows the displayed hinge pose and owns nearby projectile
+	-- queries as well as character collision. Hidden helpers stay unqueryable.
+	proxy:SetAttribute("DoorProjectileSurface", true)
+	proxy.Material = source.Material
+	proxy.Color = source.Color
 	proxy.CastShadow = false
 	proxy.Massless = true
 	proxy.CollisionGroup = source.CollisionGroup
@@ -434,11 +435,11 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 	leaf.sourceCollisionCanCollide = source.CanCollide
 	-- The authoritative slab remains solid on the server. Locally we disable only
 	-- that replicated copy so the player collides with the exact render-frame proxy
-	-- instead of a stale server CFrame. Keep it queryable as the replicated ballistic
-	-- surface, but hide it locally without reporting Transparency = 1 to projectile code.
+	-- instead of a stale server CFrame. The replicated slab becomes the projectile
+	-- fallback when this exact-pose mirror is removed.
 	source.Transparency = 0
 	source.LocalTransparencyModifier = 1
-	source.CanQuery = true
+	source.CanQuery = false
 	source.CanCollide = false
 	leaf.localCollision = proxy
 	return proxy
@@ -1176,6 +1177,7 @@ local function destroyLocalInteractionProxies(leaf: ClientLeaf)
 	end
 	if leaf.collision and leaf.collision.Parent and not leaf.broken and leaf.sourceCollisionCanCollide ~= nil then
 		leaf.collision.CanCollide = leaf.sourceCollisionCanCollide
+		leaf.collision.CanQuery = true
 		leaf.collision.Transparency = 1
 		leaf.collision.LocalTransparencyModifier = 0
 	end
