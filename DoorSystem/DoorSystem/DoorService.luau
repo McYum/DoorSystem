@@ -1313,6 +1313,7 @@ local function anchorLeafForHybrid(leafModel: Model, root: BasePart?)
 			end
 			descendant.CanCollide = false
 			descendant.CanTouch = false
+			descendant.CanQuery = false
 		end
 	end
 end
@@ -1332,6 +1333,7 @@ local function registerLeaf(state: AssemblyState, leafRig: Model): LeafState?
 		if descendant:IsA("BasePart") then
 			descendant.CanCollide = false
 			descendant.CanTouch = false
+			descendant.CanQuery = false
 			if rootPart then
 				descendant.Anchored = descendant == rootPart
 			end
@@ -3294,6 +3296,7 @@ function DoorService.BreakLeaf(leafRig: Model, player: Player?)
 		for _, descendant in leaf.leafModel:GetDescendants() do
 			if descendant:IsA("BasePart") then
 				descendant.Anchored = false
+				descendant.CanQuery = true
 				local shouldCollide = descendant:GetAttribute("BreakCollision") == true
 				descendant.CanCollide = shouldCollide
 				markedCollision = markedCollision or shouldCollide
