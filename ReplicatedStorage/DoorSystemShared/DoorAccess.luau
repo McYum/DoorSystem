@@ -22,6 +22,9 @@ function DoorAccess.GetPushContactPart(root: BasePart): BasePart
 			and victim:GetAttribute("CombatGrabPhase") == "Holding"
 			and link and link:IsA("Weld") and link.Part0 == root and link.Part1 == part
 			and (part.Position - root.Position).Magnitude <= 6 then
+			-- The collidable root reaches the door before the authored torso behind it.
+			-- Detect the actual blocker; a torso-only check can never reach the slab.
+			if part.CanCollide then return part end
 			local torso = victim:FindFirstChild("UpperTorso") or victim:FindFirstChild("Torso") or victim:FindFirstChild("LowerTorso")
 			return if torso and torso:IsA("BasePart") then torso else part
 		end
