@@ -5,6 +5,30 @@ local RunService = game:GetService("RunService")
 
 local DoorAccess = {}
 
+-- A held victim reaches the slab first. Keep the grabber as the input/permission owner.
+function DoorAccess.GetPushContactPart(root: BasePart): BasePart
+	local character = root.Parent
+	local grabId = character and character:GetAttribute("CombatGrabId")
+	if not grabId or character:GetAttribute("CombatGrabRole") ~= "Attacker"
+		or character:GetAttribute("CombatGrabPhase") ~= "Holding" then
+		return root
+	end
+	for _, part in root:GetConnectedParts(true) do
+		local victim = part.Parent
+		local link = part:FindFirstChild("CombatGrab_Weld")
+		if part.Name == "HumanoidRootPart" and victim
+			and victim:GetAttribute("CombatGrabId") == grabId
+			and victim:GetAttribute("CombatGrabRole") == "Victim"
+			and victim:GetAttribute("CombatGrabPhase") == "Holding"
+			and link and link:IsA("Weld") and link.Part0 == root and link.Part1 == part
+			and (part.Position - root.Position).Magnitude <= 6 then
+			local torso = victim:FindFirstChild("UpperTorso") or victim:FindFirstChild("Torso") or victim:FindFirstChild("LowerTorso")
+			return if torso and torso:IsA("BasePart") then torso else part
+		end
+	end
+	return root
+end
+
 local configCache: {[ModuleScript]: any} = setmetatable({}, {__mode = "k"})
 
 local function configFor(root: Instance?): {[string]: any}?

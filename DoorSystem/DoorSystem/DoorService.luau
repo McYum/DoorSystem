@@ -192,6 +192,7 @@ local activeLeaves: {[LeafState]: boolean} = {}
 local pendingLockAssemblies: {[AssemblyState]: boolean} = {}
 local playerSamples: {PlayerSample} = {}
 local playerPositionHistory: {[Player]: Vector3} = {}
+local playerPushRootHistory: {[Player]: BasePart} = {}
 local spatialBuckets: {[string]: {[LeafState]: boolean}} = {}
 local leafSpatialKey: {[LeafState]: string} = {}
 
@@ -556,9 +557,11 @@ local function refreshPlayerSamples()
 		alive[player] = true
 		local root, humanoid = rootCharacter(player)
 		if root and humanoid then
-			local position = root.Position
-			local previous = playerPositionHistory[player] or position
+			local pushRoot = DoorAccess.GetPushContactPart(root)
+			local position = pushRoot.Position
+			local previous = if playerPushRootHistory[player] == pushRoot then playerPositionHistory[player] or position else position
 			playerPositionHistory[player] = position
+			playerPushRootHistory[player] = pushRoot
 			table.insert(playerSamples, {
 				player = player,
 				root = root,
@@ -573,6 +576,7 @@ local function refreshPlayerSamples()
 	for player in playerPositionHistory do
 		if not alive[player] then
 			playerPositionHistory[player] = nil
+			playerPushRootHistory[player] = nil
 		end
 	end
 end
@@ -1958,6 +1962,9 @@ local function computePushContact(
 end
 
 local function applyPlayerPush(leaf: LeafState, sample: PlayerSample, dt: number, clientAssisted: boolean?): boolean
+	if sample.root.Parent and sample.root.Parent:GetAttribute("CombatGrabRole") == "Victim" then
+		return false
+	end
 	local state = assemblies[leaf.assembly]
 	if not state or state.locked or leaf.broken then
 		return false
@@ -2130,10 +2137,15 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 			leaf.drivers[player] = nil
 			continue
 		end
+		if root.Parent and root.Parent:GetAttribute("CombatGrabRole") == "Victim" then
+			leaf.drivers[player] = nil
+			continue
+		end
 
 		local maxDistance = tonumber(setting(leaf.rig, leaf.assembly, "MaxPushDistanceFromHinge", Config.MaxPushDistanceFromHinge)) or Config.MaxPushDistanceFromHinge
 		local maxDistanceWithPadding = maxDistance + 1.25
-		local hingeDelta = root.Position - leaf.hinge.Position
+		local pushPosition = DoorAccess.GetPushContactPart(root).Position
+		local hingeDelta = pushPosition - leaf.hinge.Position
 		if hingeDelta:Dot(hingeDelta) > maxDistanceWithPadding * maxDistanceWithPadding then
 			leaf.drivers[player] = nil
 			continue
@@ -2143,7 +2155,7 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 		local moveDirection = humanoid.MoveDirection * Vector3.new(1, 0, 1)
 		local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
 		local sprintApproach = playerIsSprinting(player) or movement.Magnitude >= sprintMinSpeed
-		local accepted, signedLever, normalSpeed, _, contactFactor = computePushContact(leaf, root.Position, movement, moveDirection, true, sprintApproach)
+		local accepted, signedLever, normalSpeed, _, contactFactor = computePushContact(leaf, pushPosition, movement, moveDirection, true, sprintApproach)
 		if not accepted then
 			continue
 		end
@@ -2243,6 +2255,9 @@ end
 local clientPushRate: {[Player]: {[Model]: number}} = {}
 
 local function handleClientPush(player: Player, rig: Instance)
+	if player.Character and player.Character:GetAttribute("CombatGrabRole") == "Victim" then
+		return
+	end
 	if not rig:IsA("Model") then
 		return
 	end
@@ -2261,7 +2276,8 @@ local function handleClientPush(player: Player, rig: Instance)
 	end
 	local maxDistance = tonumber(setting(leaf.rig, leaf.assembly, "MaxPushDistanceFromHinge", Config.MaxPushDistanceFromHinge)) or Config.MaxPushDistanceFromHinge
 	local maxDistanceWithPadding = maxDistance + 1.0
-	local hingeDelta = root.Position - leaf.hinge.Position
+	local pushRoot = DoorAccess.GetPushContactPart(root)
+	local hingeDelta = pushRoot.Position - leaf.hinge.Position
 	if hingeDelta:Dot(hingeDelta) > maxDistanceWithPadding * maxDistanceWithPadding then
 		return
 	end
@@ -2278,8 +2294,8 @@ local function handleClientPush(player: Player, rig: Instance)
 	end
 	perPlayer[rig] = now
 
-	local position = root.Position
-	local previous = playerPositionHistory[player] or position
+	local position = pushRoot.Position
+	local previous = if playerPushRootHistory[player] == pushRoot then playerPositionHistory[player] or position else position
 	local sample: PlayerSample = {
 		player = player,
 		root = root,
@@ -2327,6 +2343,7 @@ pushEvent.OnServerEvent:Connect(handleClientPush)
 Players.PlayerRemoving:Connect(function(player)
 	clientPushRate[player] = nil
 	playerPositionHistory[player] = nil
+	playerPushRootHistory[player] = nil
 end)
 
 local function pointInsideCollisionAtAngle(leaf: LeafState, angle: number, worldPoint: Vector3, padding: number): boolean

@@ -1264,7 +1264,8 @@ local function updateLocalPrediction(leaf: ClientLeaf, dt: number): number
 		if velocity.Magnitude > 0.8 and intent.Magnitude > 0.05 then
 			local cf = collision.CFrame
 			local half = collision.Size * 0.5
-			local localPos = cf:PointToObjectSpace(localRoot.Position)
+			local pushRoot = if DoorAccess and DoorAccess.GetPushContactPart then DoorAccess.GetPushContactPart(localRoot) else localRoot
+			local localPos = cf:PointToObjectSpace(pushRoot.Position)
 			local localVel = cf:VectorToObjectSpace(velocity)
 			local inputWorld = intent.Unit
 			local inputLocal = cf:VectorToObjectSpace(inputWorld)
@@ -1316,6 +1317,11 @@ local function scanLocalPushIntent(now: number)
 		return
 	end
 
+	local pushRoot = if DoorAccess and DoorAccess.GetPushContactPart then DoorAccess.GetPushContactPart(localRoot) else localRoot
+	if localRoot.Parent and localRoot.Parent:GetAttribute("CombatGrabRole") == "Victim" then
+		return
+	end
+	local pushPosition = pushRoot.Position
 	local movement = localRoot.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
 	local md = localHumanoid.MoveDirection * Vector3.new(1, 0, 1)
 	if md.Magnitude > 0.05 then
@@ -1369,8 +1375,8 @@ local function scanLocalPushIntent(now: number)
 		if sprintApproach then
 			predictionTime = math.max(predictionTime, tonumber(setting(leaf.rig, assembly, "SprintPushPredictionTime", Config.SprintPushPredictionTime)) or Config.SprintPushPredictionTime)
 		end
-		local currentLocal = cf:PointToObjectSpace(localRoot.Position)
-		local futureLocal = cf:PointToObjectSpace(localRoot.Position + movement * predictionTime)
+		local currentLocal = cf:PointToObjectSpace(pushPosition)
+		local futureLocal = cf:PointToObjectSpace(pushPosition + movement * predictionTime)
 		local localVelocity = cf:VectorToObjectSpace(movement)
 		local sidePadding = Config.PushSidePadding or 0.72
 		if sprintApproach then
@@ -1680,7 +1686,8 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 		-- Never re-enable the proxy inside the local avatar. Keep yielding for a tiny
 		-- clearance window until the root has crossed/cleared the moving slab.
 		if not shouldYield and not stableCollisionState and serverNow < leaf.localCollisionYieldUntil and localRoot then
-			local lp = localCollision.CFrame:PointToObjectSpace(localRoot.Position)
+			local pushRoot = if DoorAccess and DoorAccess.GetPushContactPart then DoorAccess.GetPushContactPart(localRoot) else localRoot
+			local lp = localCollision.CFrame:PointToObjectSpace(pushRoot.Position)
 			local half = localCollision.Size * 0.5
 			local clearance = Config.LocalPushYieldClearance or 0.72
 			local stillInside = math.abs(lp.X) <= half.X + 0.9
