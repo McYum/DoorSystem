@@ -1442,7 +1442,7 @@ local function scanLocalPushIntent(now: number)
 			local last = pushSentAt[leaf.rig] or -math.huge
 			if now - last >= (Config.PushSendInterval or 0.045) then
 				pushSentAt[leaf.rig] = now
-				pushEvent:FireServer(leaf.rig)
+				pushEvent:FireServer(leaf.rig, md)
 			end
 		end
 	end
@@ -1456,11 +1456,16 @@ local function renderLeaf(leaf: ClientLeaf, dt: number, serverNow: number, camer
 	refreshLockIndicator(leaf, assembly)
 	local pendingPush = localPushStates[leaf.rig]
 	local lockedForPush = assembly and assembly:GetAttribute("Locked") == true
+	local yieldMinimumSpeed = tonumber(setting(leaf.rig, assembly, "LocalPushYieldMinNormalSpeed", Config.LocalPushYieldMinNormalSpeed)) or Config.LocalPushYieldMinNormalSpeed
+	if localRoot and DoorAccess and DoorAccess.GetPushContactPart and DoorAccess.GetPushContactPart(localRoot) ~= localRoot then
+		-- Holding slows walking below the ordinary speed-6 yield threshold.
+		yieldMinimumSpeed = math.min(yieldMinimumSpeed, Config.PushMinimumSpeed or 0.75)
+	end
 	local localContactYield = Config.LocalPushCollisionYield == true
 		and not lockedForPush
 		and pendingPush ~= nil
 		and serverNow <= pendingPush.expiresAt
-		and pendingPush.normalSpeed >= (tonumber(setting(leaf.rig, assembly, "LocalPushYieldMinNormalSpeed", Config.LocalPushYieldMinNormalSpeed)) or Config.LocalPushYieldMinNormalSpeed)
+		and pendingPush.normalSpeed >= yieldMinimumSpeed
 	-- A LocalPushState exists only after the short swept-volume, movement-direction,
 	-- side, height, and lock checks pass. Honor it immediately instead of waiting for
 	-- the root to enter the body-contact gap, when Roblox may already have killed the

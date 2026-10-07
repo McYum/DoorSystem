@@ -118,6 +118,7 @@ export type PushDriver = {
 	startedAt: number,
 	lastRefreshAt: number,
 	peakNormalSpeed: number,
+	intent: Vector3?,
 }
 
 export type LeafState = {
@@ -2144,7 +2145,8 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 
 		local maxDistance = tonumber(setting(leaf.rig, leaf.assembly, "MaxPushDistanceFromHinge", Config.MaxPushDistanceFromHinge)) or Config.MaxPushDistanceFromHinge
 		local maxDistanceWithPadding = maxDistance + 1.25
-		local pushPosition = DoorAccess.GetPushContactPart(root).Position
+		local pushPart = DoorAccess.GetPushContactPart(root)
+		local pushPosition = pushPart.Position
 		local hingeDelta = pushPosition - leaf.hinge.Position
 		if hingeDelta:Dot(hingeDelta) > maxDistanceWithPadding * maxDistanceWithPadding then
 			leaf.drivers[player] = nil
@@ -2152,7 +2154,7 @@ local function applyActivePushDrivers(leaf: LeafState, dt: number, now: number):
 		end
 
 		local movement = root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
-		local moveDirection = humanoid.MoveDirection * Vector3.new(1, 0, 1)
+		local moveDirection = (if pushPart ~= root and driver.intent then driver.intent else humanoid.MoveDirection) * Vector3.new(1, 0, 1)
 		local sprintMinSpeed = tonumber(setting(leaf.rig, leaf.assembly, "SprintPushMinSpeed", Config.SprintPushMinSpeed)) or Config.SprintPushMinSpeed
 		local sprintApproach = playerIsSprinting(player) or movement.Magnitude >= sprintMinSpeed
 		local accepted, signedLever, normalSpeed, _, contactFactor = computePushContact(leaf, pushPosition, movement, moveDirection, true, sprintApproach)
@@ -2254,7 +2256,7 @@ end
 -- character state and runs the exact same rigid-body impulse calculation.
 local clientPushRate: {[Player]: {[Model]: number}} = {}
 
-local function handleClientPush(player: Player, rig: Instance)
+local function handleClientPush(player: Player, rig: Instance, clientIntent: any)
 	if player.Character and player.Character:GetAttribute("CombatGrabRole") == "Victim" then
 		return
 	end
@@ -2294,6 +2296,14 @@ local function handleClientPush(player: Player, rig: Instance)
 	end
 	perPlayer[rig] = now
 
+	local pushIntent = humanoid.MoveDirection
+	-- MoveDirection is client input, not reliably replicated when the carried assembly stalls.
+	-- Accept only a bounded planar direction for a server-verified held pair; positions stay server-owned.
+	if pushRoot ~= root and typeof(clientIntent) == "Vector3"
+		and clientIntent.X == clientIntent.X and clientIntent.Y == clientIntent.Y and clientIntent.Z == clientIntent.Z
+		and clientIntent.Magnitude <= 1.05 then
+		pushIntent = clientIntent * Vector3.new(1, 0, 1)
+	end
 	local position = pushRoot.Position
 	local previous = if playerPushRootHistory[player] == pushRoot then playerPositionHistory[player] or position else position
 	local sample: PlayerSample = {
@@ -2303,7 +2313,7 @@ local function handleClientPush(player: Player, rig: Instance)
 		position = position,
 		previousPosition = previous,
 		velocity = root.AssemblyLinearVelocity,
-		moveDirection = humanoid.MoveDirection,
+		moveDirection = pushIntent,
 	}
 
 	-- Crucially, do NOT create a sustained drive merely because the client named a
@@ -2320,7 +2330,7 @@ local function handleClientPush(player: Player, rig: Instance)
 
 		local currentCF = getCollisionPose(leaf, leaf.angle)
 		local planarVelocity = root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
-		local planarIntent = humanoid.MoveDirection * Vector3.new(1, 0, 1)
+		local planarIntent = pushIntent * Vector3.new(1, 0, 1)
 		local measuredNormal = math.abs(currentCF.LookVector:Dot(planarVelocity))
 		local intendedNormal = 0
 		if planarIntent.Magnitude > 0.05 then
@@ -2334,6 +2344,7 @@ local function handleClientPush(player: Player, rig: Instance)
 			startedAt = startedAt,
 			lastRefreshAt = now,
 			peakNormalSpeed = math.max(approachSpeed, previousPeak * 0.82),
+			intent = if pushRoot ~= root then pushIntent else nil,
 		}
 		setActive(leaf)
 	end
