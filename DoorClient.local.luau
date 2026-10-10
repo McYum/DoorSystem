@@ -235,6 +235,20 @@ end
 local function findHandleMotor(leafModel: Model, name: string): Motor6D?
 	for _, descendant in leafModel:GetDescendants() do
 		if descendant:IsA("Motor6D") and descendant.Name == name then
+			local reference = descendant:FindFirstChild("PivotTarget")
+			local target = if reference and reference:IsA("ObjectValue") then reference.Value else nil
+			local part0, part1 = descendant.Part0, descendant.Part1
+			if target and target:IsDescendantOf(leafModel) and part0 and part1
+				and (target:IsA("BasePart") or target:IsA("Model")) then
+				-- Rebase the render clone's joint around the authored pivot without
+				-- moving the handle in its resting pose. Transform rotates here.
+				local pivot = target:GetPivot()
+				-- C0 assignment can immediately move the connected assembly.
+				local c0 = part0.CFrame:ToObjectSpace(pivot)
+				local c1 = part1.CFrame:ToObjectSpace(pivot)
+				descendant.C0 = c0
+				descendant.C1 = c1
+			end
 			return descendant
 		end
 	end

@@ -101,7 +101,25 @@ the same geometry, direction, lock, and character-state validation before changi
 the authoritative hinge; other clients retain their own replicated solid proxy.
 
 Both authored handles animate together by default (`HandleAnimateBothSides`) so the
-movement is visible from either face. An optional `LockFrontMotor` and
+movement is visible from either face.
+
+To choose a handle's rotation point, add an `ObjectValue` named `PivotTarget` under
+its `HandleFrontMotor` or `HandleBackMotor`, and set `Value` to the handle's
+`BasePart`/`MeshPart` or `Model` inside the same `Leaf`. The target must be connected
+to that motor's `Part1` (directly or through welds). Select the target and use
+Studio's **Model > Edit Pivot** to position and orient its pivot at the spindle.
+`HandleAxis` (default `Z`) rotates around that pivot's local axis. The client
+rebases the render clone's motor offsets while preserving the handle's resting
+pose; the source rig stays unchanged. Missing or invalid references keep the
+authored motor offsets. Restart play after editing the pivot or reference.
+
+Double doors use the same setup independently on each leaf: give each handle
+motor a target inside its own `Leaf`, and configure both sides if both animate.
+`HandlePressDeg` can be overridden on each leaf rig for mirrored handle directions.
+Studio model edits are saved with the place; the Git repo contains the code and
+these setup instructions.
+
+An optional `LockFrontMotor` and
 `LockBackMotor` can drive authored thumbturn models between
 `LockIndicatorUnlockedDeg` and `LockIndicatorLockedDeg`. The lockable Studio demos
 include persistent `LockVisual` models with visible `LockFrontRoot` and
