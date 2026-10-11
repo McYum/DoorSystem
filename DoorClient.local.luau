@@ -438,6 +438,11 @@ local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
 	-- The mirror follows the displayed hinge pose and owns nearby projectile
 	-- queries as well as character collision. Hidden helpers stay unqueryable.
 	proxy:SetAttribute("DoorProjectileSurface", true)
+	-- Combat reports must identify the replicated slab, not this private mirror.
+	local hitPart = Instance.new("ObjectValue")
+	hitPart.Name = "DoorHitPart"
+	hitPart.Value = source
+	hitPart.Parent = proxy
 	proxy.Material = source.Material
 	proxy.Color = source.Color
 	proxy.CastShadow = false
