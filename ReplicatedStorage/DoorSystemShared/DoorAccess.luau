@@ -224,6 +224,9 @@ function DoorAccess.Check(
 		return false, "PlayerUnavailable"
 	end
 
+	local gui=player:FindFirstChildOfClass("PlayerGui")
+	if player:GetAttribute("LockpickInteracting")==true or gui and gui:GetAttribute("LockpickUIOpen")==true then return false,"Lockpicking" end
+
 	local normalizedAction = string.lower(action)
 	if normalizedAction == "close" then
 		return true, nil

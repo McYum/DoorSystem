@@ -1238,6 +1238,7 @@ end
 local clientInteractRate: {[Player]: number} = {}
 
 local function handleClientInteraction(player: Player, rig: Instance, action: any)
+	if player:GetAttribute("LockpickInteracting")==true then return end
 	if not rig:IsA("Model") then
 		return
 	end
@@ -2257,6 +2258,7 @@ end
 local clientPushRate: {[Player]: {[Model]: number}} = {}
 
 local function handleClientPush(player: Player, rig: Instance, clientIntent: any)
+	if player:GetAttribute("LockpickInteracting")==true then return end
 	if player.Character and player.Character:GetAttribute("CombatGrabRole") == "Victim" then
 		return
 	end
