@@ -96,6 +96,11 @@ end
 
 local function valueMatches(instance: Instance, itemName: string?, category: string?, keyId: string?): boolean
 	local instanceCategory = nonEmptyString(instance:GetAttribute("Category"))
+	-- Ordinary geometry cannot satisfy a required category. Door keys still
+	-- reach the master-key override even when another category was requested.
+	if category and instanceCategory ~= category and instanceCategory ~= "DoorKey" then
+		return false
+	end
 	local instanceKeyId = nonEmptyString(instance:GetAttribute("DoorKeyId"))
 		or nonEmptyString(instance:GetAttribute("KeyId"))
 	local displayName = nonEmptyString(instance:GetAttribute("DisplayName"))
