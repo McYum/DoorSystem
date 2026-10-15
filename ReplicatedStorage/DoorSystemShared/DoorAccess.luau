@@ -142,7 +142,8 @@ local function playerHasItem(player: Player, itemName: string?, category: string
 			if itemMatches(root, itemName, category, keyId) then
 				return true
 			end
-			for _, descendant in root:GetDescendants() do
+			local candidates = if category then root:QueryDescendants("[$Category], ObjectValue") else root:GetDescendants()
+			for _, descendant in candidates do
 				if itemMatches(descendant, itemName, category, keyId) then
 					return true
 				end
@@ -152,7 +153,8 @@ local function playerHasItem(player: Player, itemName: string?, category: string
 
 	local character = player.Character
 	if character then
-		for _, descendant in character:GetDescendants() do
+		local candidates = if category then character:QueryDescendants("[$Category], ObjectValue") else character:GetDescendants()
+		for _, descendant in candidates do
 			if itemMatches(descendant, itemName, category, keyId) then
 				return true
 			end
