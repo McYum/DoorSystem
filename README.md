@@ -4,6 +4,18 @@ DoorSystem doors are authored Models tagged `DoorSystemDoor`. Each assembly cont
 `Leaves/<LeafRig>`, and each leaf rig contains `Hinge` plus a `Leaf` Model. The demo
 assemblies in Studio are persistent instances; no runtime demo builder is required.
 
+Double-door prompts operate both leaves when their open/closed intent matches. If
+one leaf was opened separately, prompts operate the selected leaf until the pair
+matches again. `PromptOpenMode="All"` always operates every leaf, even in mixed
+states; explicit server commands targeting a leaf remain independent.
+
+Client visuals track late-arriving parts, decals and weld references. Stationary
+source geometry stays hidden, and updates are coalesced into one visual refresh per
+arrival batch without adding frame-by-frame hierarchy scans. Until a streamed
+part has a valid connection to the visual Root, it stays anchored and moves with
+the model rather than falling away. Keep moving glass and attached decorations
+inside their own `Leaves/<LeafRig>/Leaf`, with joints referencing that same leaf.
+
 ## Inventory keys and side locks
 
 Set these attributes on the tagged assembly (or on one leaf rig to override it):

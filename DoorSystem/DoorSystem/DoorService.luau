@@ -819,6 +819,11 @@ local function leafLooksOpen(leaf: LeafState): boolean
 	-- The prompt represents the action that makes sense NOW, not merely the current
 	-- angle. If a half-open door is actively closing, show Open so the prompt can
 	-- decisively reverse it. Likewise an explicit open target counts as open intent.
+	if leaf.mode == "HandleEngaged" then
+		return true
+	elseif leaf.mode == "HandleEngagedClose" then
+		return false
+	end
 	if leaf.targetAngle ~= nil then
 		return math.abs(leaf.targetAngle) >= threshold
 	end
@@ -1163,6 +1168,7 @@ end
 
 local function promptSetAssembly(state: AssemblyState, sourceLeaf: LeafState, player: Player, shouldClose: boolean)
 	local mode = tostring(attr(state.model, "PromptOpenMode", "Single"))
+	local paired = #state.leaves == 2 and leafLooksOpen(state.leaves[1]) == leafLooksOpen(state.leaves[2])
 	if mode == "All" then
 		for _, leaf in state.leaves do
 			if shouldClose then
@@ -1176,6 +1182,19 @@ local function promptSetAssembly(state: AssemblyState, sourceLeaf: LeafState, pl
 			requestPromptClose(sourceLeaf, player, true)
 		else
 			requestPromptOpen(sourceLeaf, player, true)
+		end
+		-- Matching double-door leaves operate together; mixed leaves stay independent.
+		-- Open the operated leaf first so its lock access cannot be bypassed via a sibling.
+		if paired and (shouldClose or not state.locked) then
+			for _, leaf in state.leaves do
+				if leaf ~= sourceLeaf then
+					if shouldClose then
+						requestPromptClose(leaf, player, false)
+					else
+						requestPromptOpen(leaf, player, false)
+					end
+				end
+			end
 		end
 	end
 	updatePromptText(state)

@@ -63,7 +63,8 @@ return table.freeze({
 	AutoCloseExtraHoldTime = 0,
 	PromptHoldOpenTime = 1.8,
 	PromptOpenAngleDeg = 88,
-	-- "Single" only operates the interacted leaf; "All" operates every leaf in an assembly.
+	-- "Single" links matching double-door leaves but keeps mixed leaves independent.
+	-- "All" always operates every leaf in an assembly, including mixed states.
 	PromptOpenMode = "Single",
 	-- 0 = choose side dynamically. -1 / +1 can force an authored opening direction.
 	OpenSign = 0,

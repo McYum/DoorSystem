@@ -139,7 +139,11 @@ export type ClientLeaf = {
 	leafModel: Model,
 	renderModel: Model?,
 	sourceLocalTransparency: {[BasePart]: number},
+	sourceDecalTransparency: {[Decal]: number},
 	sourceCanQuery: {[BasePart]: boolean},
+	sourceConnections: {[Instance]: {RBXScriptConnection}},
+	sourceHierarchyConnections: {RBXScriptConnection},
+	sourceRefreshPending: boolean,
 	sourceHidden: boolean,
 	collision: BasePart?,
 	localCollision: BasePart?,
@@ -262,39 +266,58 @@ local function axisTransform(axis: string, degrees: number): CFrame
 	return CFrame.Angles(r, 0, 0)
 end
 
-local function setSourceHidden(leaf: ClientLeaf, hidden: boolean)
-	if hidden == leaf.sourceHidden then
-		return
-	end
-
-	for _, descendant in leaf.leafModel:GetDescendants() do
-		if descendant:IsA("BasePart") then
-			if hidden then
-				if leaf.sourceLocalTransparency[descendant] == nil then
-					leaf.sourceLocalTransparency[descendant] = descendant.LocalTransparencyModifier
-				end
-				if leaf.sourceCanQuery[descendant] == nil then
-					leaf.sourceCanQuery[descendant] = descendant.CanQuery
-				end
-				descendant.LocalTransparencyModifier = 1
-				-- The replicated source leaf stays at the authored/server pose while the
-				-- visible clone is reconstructed locally. Never let local raycasts hit
-				-- that hidden geometry; DoorCollision remains the authoritative query target.
-				descendant.CanQuery = false
-			else
-				local original = leaf.sourceLocalTransparency[descendant]
-				descendant.LocalTransparencyModifier = if original ~= nil then original else 0
-				local originalCanQuery = leaf.sourceCanQuery[descendant]
-				if originalCanQuery ~= nil then
-					descendant.CanQuery = originalCanQuery
-				end
+local function setSourceDescendantHidden(leaf: ClientLeaf, descendant: Instance, hidden: boolean)
+	if descendant:IsA("BasePart") then
+		if hidden then
+			if leaf.sourceLocalTransparency[descendant] == nil then
+				leaf.sourceLocalTransparency[descendant] = descendant.LocalTransparencyModifier
+			end
+			if leaf.sourceCanQuery[descendant] == nil then
+				leaf.sourceCanQuery[descendant] = descendant.CanQuery
+			end
+			descendant.LocalTransparencyModifier = 1
+			-- The replicated source leaf stays at the authored/server pose while the
+			-- visible clone is reconstructed locally. Never let local raycasts hit
+			-- that hidden geometry; DoorCollision remains the authoritative query target.
+			descendant.CanQuery = false
+		else
+			local original = leaf.sourceLocalTransparency[descendant]
+			descendant.LocalTransparencyModifier = if original ~= nil then original else 0
+			local originalCanQuery = leaf.sourceCanQuery[descendant]
+			if originalCanQuery ~= nil then
+				descendant.CanQuery = originalCanQuery
 			end
 		end
+	elseif descendant:IsA("Decal") then
+		-- Decals and Textures remain visible when only their parent part is hidden.
+		if hidden then
+			if leaf.sourceDecalTransparency[descendant] == nil then
+				leaf.sourceDecalTransparency[descendant] = descendant.Transparency
+			end
+			descendant.Transparency = 1
+		else
+			local original = leaf.sourceDecalTransparency[descendant]
+			if original ~= nil then descendant.Transparency = original end
+		end
 	end
-	leaf.sourceHidden = hidden
 end
 
-local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean)
+local function setSourceHidden(leaf: ClientLeaf, hidden: boolean)
+	if hidden == leaf.sourceHidden then return end
+	-- Change ownership first so restoration does not trip our visibility guards.
+	leaf.sourceHidden = hidden
+	for _, descendant in leaf.leafModel:GetDescendants() do
+		if hidden then
+			if descendant:IsA("BasePart") then
+				leaf.sourceLocalTransparency[descendant] = descendant.LocalTransparencyModifier
+				leaf.sourceCanQuery[descendant] = descendant.CanQuery
+			elseif descendant:IsA("Decal") then leaf.sourceDecalTransparency[descendant] = descendant.Transparency end
+		end
+		setSourceDescendantHidden(leaf, descendant, hidden)
+	end
+end
+
+local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean, keepCollision: boolean?)
 	if leaf.frontMotor then
 		UISpr.stop(leaf.frontMotor)
 	end
@@ -318,13 +341,13 @@ local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean)
 		leaf.renderModel = nil
 	end
 
-	if leaf.localCollision then
+	if not keepCollision and leaf.localCollision then
 		leaf.localCollision:Destroy()
 		leaf.localCollision = nil
 	end
 	-- Restore the replicated collision slab locally when the private presentation
 	-- proxy is no longer being used. Do not force it on for a legacy broken leaf.
-	if leaf.collision and leaf.collision.Parent and not leaf.broken and leaf.sourceCollisionCanCollide ~= nil then
+	if not keepCollision and leaf.collision and leaf.collision.Parent and not leaf.broken and leaf.sourceCollisionCanCollide ~= nil then
 		leaf.collision.CanCollide = leaf.sourceCollisionCanCollide
 		leaf.collision.CanQuery = true
 		leaf.collision.Transparency = 1
@@ -348,6 +371,9 @@ local function ensureRenderModel(leaf: ClientLeaf): Model?
 	end
 
 	local source = leaf.leafModel
+	-- A replacement clone must use authored visibility, not our hidden-source overrides.
+	-- This entire copy/restore operation does not yield, so the source is never rendered.
+	setSourceHidden(leaf, false)
 	local oldArchivable = source.Archivable
 	source.Archivable = true
 	local clone = source:Clone()
@@ -360,6 +386,16 @@ local function ensureRenderModel(leaf: ClientLeaf): Model?
 			descendant:Destroy()
 		elseif descendant:IsA("ProximityPrompt") then
 			descendant:Destroy()
+		elseif descendant:IsA("JointInstance") or descendant:IsA("WeldConstraint") then
+			-- A partially replicated weld must never attach the render clone to a
+			-- stationary server part outside it. Rebuild when its references arrive.
+			if not descendant.Part0 or not descendant.Part1
+				or not descendant.Part0:IsDescendantOf(clone) or not descendant.Part1:IsDescendantOf(clone) then
+				descendant:Destroy()
+			end
+		elseif descendant:IsA("Constraint") then
+			if (descendant.Attachment0 and not descendant.Attachment0:IsDescendantOf(clone))
+				or (descendant.Attachment1 and not descendant.Attachment1:IsDescendantOf(clone)) then descendant:Destroy() end
 		elseif descendant:IsA("BasePart") then
 			descendant.CanCollide = false
 			descendant.CanTouch = false
@@ -372,9 +408,38 @@ local function ensureRenderModel(leaf: ClientLeaf): Model?
 	-- remainder is local-only, so there are no server corrections fighting the welds.
 	local cloneRootInst = clone:FindFirstChild("Root", true)
 	local cloneRoot = if cloneRootInst and cloneRootInst:IsA("BasePart") then cloneRootInst else nil
+	-- Streamed parts can arrive before their welds. Keep those visuals anchored
+	-- until a complete Root connection exists; PivotTo still moves them correctly.
+	local connected: {[BasePart]: boolean} = {}
+	if cloneRoot then
+		local neighbours: {[BasePart]: {BasePart}} = {}
+		for _, joint in clone:GetDescendants() do
+			local a: BasePart? = nil
+			local b: BasePart? = nil
+			if joint:IsA("JointInstance") or joint:IsA("WeldConstraint") then a, b = joint.Part0, joint.Part1
+			elseif joint:IsA("RigidConstraint") then
+				a = joint.Attachment0 and joint.Attachment0:FindFirstAncestorWhichIsA("BasePart")
+				b = joint.Attachment1 and joint.Attachment1:FindFirstAncestorWhichIsA("BasePart")
+			end
+			if a and b then
+				neighbours[a] = neighbours[a] or {}
+				neighbours[b] = neighbours[b] or {}
+				table.insert(neighbours[a], b) table.insert(neighbours[b], a)
+			end
+		end
+		local pending = {cloneRoot}
+		connected[cloneRoot] = true
+		local index = 1
+		while index <= #pending do
+			for _, part in neighbours[pending[index]] or {} do
+				if not connected[part] then connected[part] = true table.insert(pending, part) end
+			end
+			index += 1
+		end
+	end
 	for _, descendant in clone:GetDescendants() do
 		if descendant:IsA("BasePart") then
-			descendant.Anchored = if cloneRoot then descendant == cloneRoot else true
+			descendant.Anchored = descendant == cloneRoot or not connected[descendant]
 		end
 	end
 
@@ -402,6 +467,89 @@ local function ensureRenderModel(leaf: ClientLeaf): Model?
 	leaf.lockIndicatorState = locked
 	setSourceHidden(leaf, true)
 	return clone
+end
+
+local function queueSourceRefresh(leaf: ClientLeaf)
+	if leaf.sourceRefreshPending then return end
+	leaf.sourceRefreshPending = true
+	task.defer(function()
+		leaf.sourceRefreshPending = false
+		if leaves[leaf.rig] ~= leaf or not leaf.leafModel.Parent or leaf.broken then return end
+		local authoredOffset = leaf.rig:GetAttribute("ClosedHingeToLeaf")
+		if typeof(authoredOffset) == "CFrame" then leaf.hingeToLeaf = authoredOffset end
+		destroyRenderModel(leaf, false, true)
+		ensureRenderModel(leaf)
+	end)
+end
+
+local function bindSourceDescendant(leaf: ClientLeaf, descendant: Instance)
+	if leaf.sourceConnections[descendant] then return end
+	local connections = {}
+	local function watch(property: string, callback: () -> ())
+		table.insert(connections, descendant:GetPropertyChangedSignal(property):Connect(callback))
+	end
+	if descendant:IsA("BasePart") then
+		watch("Transparency", function() if leaf.sourceHidden then queueSourceRefresh(leaf) end end)
+		watch("LocalTransparencyModifier", function()
+			if leaf.sourceHidden and descendant.LocalTransparencyModifier ~= 1 then
+				leaf.sourceLocalTransparency[descendant] = descendant.LocalTransparencyModifier
+				setSourceDescendantHidden(leaf, descendant, true)
+			end
+		end)
+		watch("CanQuery", function()
+			if leaf.sourceHidden and descendant.CanQuery then descendant.CanQuery = false end
+		end)
+	elseif descendant:IsA("Decal") then
+		watch("Transparency", function()
+			if leaf.sourceHidden and descendant.Transparency ~= 1 then
+				leaf.sourceDecalTransparency[descendant] = descendant.Transparency
+				setSourceDescendantHidden(leaf, descendant, true)
+				queueSourceRefresh(leaf)
+			end
+		end)
+	elseif descendant:IsA("JointInstance") or descendant:IsA("WeldConstraint") then
+		watch("Part0", function() queueSourceRefresh(leaf) end)
+		watch("Part1", function() queueSourceRefresh(leaf) end)
+		if descendant:IsA("JointInstance") then
+			watch("C0", function() queueSourceRefresh(leaf) end)
+			watch("C1", function() queueSourceRefresh(leaf) end)
+		end
+	elseif descendant:IsA("Constraint") then
+		watch("Attachment0", function() queueSourceRefresh(leaf) end)
+		watch("Attachment1", function() queueSourceRefresh(leaf) end)
+	elseif descendant:IsA("ObjectValue") then
+		watch("Value", function() queueSourceRefresh(leaf) end)
+	end
+	leaf.sourceConnections[descendant] = connections
+	if leaf.sourceHidden then setSourceDescendantHidden(leaf, descendant, true) end
+end
+
+local function disconnectSourceTracking(leaf: ClientLeaf)
+	for _, connections in leaf.sourceConnections do
+		for _, connection in connections do connection:Disconnect() end
+	end
+	for _, connection in leaf.sourceHierarchyConnections do connection:Disconnect() end
+	table.clear(leaf.sourceConnections)
+	table.clear(leaf.sourceHierarchyConnections)
+end
+
+local function bindSourceTracking(leaf: ClientLeaf)
+	table.insert(leaf.sourceHierarchyConnections, leaf.leafModel.DescendantAdded:Connect(function(descendant)
+		bindSourceDescendant(leaf, descendant)
+		queueSourceRefresh(leaf)
+	end))
+	table.insert(leaf.sourceHierarchyConnections, leaf.leafModel.DescendantRemoving:Connect(function(descendant)
+		local connections = leaf.sourceConnections[descendant]
+		if connections then for _, connection in connections do connection:Disconnect() end end
+		leaf.sourceConnections[descendant] = nil
+		setSourceDescendantHidden(leaf, descendant, false)
+		if descendant:IsA("BasePart") then
+			leaf.sourceLocalTransparency[descendant] = nil
+			leaf.sourceCanQuery[descendant] = nil
+		elseif descendant:IsA("Decal") then leaf.sourceDecalTransparency[descendant] = nil end
+		queueSourceRefresh(leaf)
+	end))
+	for _, descendant in leaf.leafModel:GetDescendants() do bindSourceDescendant(leaf, descendant) end
 end
 
 local function ensureLocalCollisionMirror(leaf: ClientLeaf): BasePart?
@@ -487,7 +635,11 @@ local function ensureLeaf(rig: Model): ClientLeaf?
 		leafModel = leafModel,
 		renderModel = nil,
 		sourceLocalTransparency = {},
+		sourceDecalTransparency = {},
 		sourceCanQuery = {},
+		sourceConnections = {},
+		sourceHierarchyConnections = {},
+		sourceRefreshPending = false,
 		sourceHidden = false,
 		collision = collision,
 		localCollision = nil,
@@ -526,6 +678,7 @@ local function ensureLeaf(rig: Model): ClientLeaf?
 		activeMotionSound = nil,
 	}
 	leaves[rig] = state
+	bindSourceTracking(state)
 	-- Keep the visual clone authoritative for fidelity at distance, but defer the
 	-- heavier local collision/prompt proxies until the local player is relevant.
 	ensureRenderModel(state)
@@ -1218,8 +1371,9 @@ local function refreshRenderLeaves()
 	local interactionSq = interactionDistance * interactionDistance
 	local rootPosition = localRoot and localRoot.Position or nil
 	for rig, leaf in leaves do
-		if not rig.Parent then
-			if leaf.renderModel then leaf.renderModel:Destroy() end
+		if not rig.Parent or not leaf.leafModel:IsDescendantOf(rig) then
+			disconnectSourceTracking(leaf)
+			destroyRenderModel(leaf, true)
 			destroyLocalInteractionProxies(leaf)
 			leaves[rig] = nil
 		else
