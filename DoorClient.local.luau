@@ -335,6 +335,8 @@ local function destroyRenderModel(leaf: ClientLeaf, showSource: boolean, keepCol
 	leaf.lockFrontMotor = nil
 	leaf.lockBackMotor = nil
 	leaf.lockIndicatorState = nil
+	-- A rebuild/removal destroys this sound with its render root.
+	leaf.activeMotionSound = nil
 
 	if leaf.renderModel then
 		leaf.renderModel:Destroy()
@@ -1371,10 +1373,13 @@ local function refreshRenderLeaves()
 	local interactionSq = interactionDistance * interactionDistance
 	local rootPosition = localRoot and localRoot.Position or nil
 	for rig, leaf in leaves do
-		if not rig.Parent or not leaf.leafModel:IsDescendantOf(rig) then
+		-- A streamed-out assembly still owns its nested Leaves/rig hierarchy.
+		-- Checking only rig.Parent retained that whole hierarchy and its listeners.
+		if not rig:IsDescendantOf(workspace) or not findAssembly(rig) or not leaf.leafModel:IsDescendantOf(rig) then
 			disconnectSourceTracking(leaf)
 			destroyRenderModel(leaf, true)
 			destroyLocalInteractionProxies(leaf)
+			pushSentAt[rig] = nil
 			leaves[rig] = nil
 		else
 			if not leaf.collision or not leaf.collision.Parent then
