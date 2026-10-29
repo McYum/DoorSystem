@@ -2965,7 +2965,14 @@ function DoorService.SetLocked(assembly: Model, locked: boolean, player: Player?
 	end
 
 	if locked and (assembly:GetAttribute("Breached") == true or assembly:GetAttribute("LockBroken") == true) then
-		if external and attr(assembly, "ExternalLockRepairsBrokenLock", Config.ExternalLockRepairsBrokenLock) == true then
+		local repairLock = if external
+			then attr(assembly, "ExternalLockRepairsBrokenLock", Config.ExternalLockRepairsBrokenLock)
+			else attr(assembly, "RelockAfterBreach", Config.RelockAfterBreach)
+		if repairLock == true then
+			-- A breached latch is reusable; a detached/broken leaf still needs Reset.
+			for _, leaf in state.leaves do
+				if leaf.broken then return end
+			end
 			assembly:SetAttribute("Breached", false)
 			assembly:SetAttribute("LockBroken", false)
 			for _, leaf in state.leaves do
@@ -2973,6 +2980,7 @@ function DoorService.SetLocked(assembly: Model, locked: boolean, player: Player?
 				local maxHealth = tonumber(setting(leaf.rig, assembly, "MaxHealth", Config.MaxHealth)) or Config.MaxHealth
 				leaf.health = maxHealth
 				leaf.rig:SetAttribute("Health", maxHealth)
+				leaf.rig:SetAttribute("HealthPercent", if maxHealth > 0 then 1 else 0)
 				leaf.rig:SetAttribute("Breached", false)
 				leaf.rig:SetAttribute("LockBroken", false)
 			end

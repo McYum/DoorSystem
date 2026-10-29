@@ -923,7 +923,7 @@ local function updateLocalPromptState(leaf: ClientLeaf)
 	if leaf.lockPrompt then
 		local action = if assembly:GetAttribute("Locked") == true then "Unlock" else "Lock"
 		leaf.lockPrompt.Enabled = not leaf.broken
-			and assembly:GetAttribute("Breached") ~= true
+			and (assembly:GetAttribute("Breached") ~= true or assembly:GetAttribute("RelockAfterBreach") ~= false)
 			and setting(leaf.rig, assembly, "LockPromptEnabled", false) == true
 			and setting(leaf.rig, assembly, "AllowPlayerLocking", false) == true
 			and canPlayerAccess(leaf, assembly, action)

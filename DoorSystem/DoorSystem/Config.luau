@@ -184,6 +184,8 @@ return table.freeze({
 	ExternalOpenAngleDeg = 92,
 	ExternalOpenUnlocks = true,
 	ExternalLockRepairsBrokenLock = true,
+	-- Re-locking an intact door rearms a breached latch. Assembly override only.
+	RelockAfterBreach = true,
 	-- Compatibility/readability attribute retained from earlier versions. External/API
 	-- Open/Close/Lock are authoritative in v7.7 and always bypass obstruction safety.
 	ExternalCommandIgnoreSafety = true,

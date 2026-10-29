@@ -18,6 +18,14 @@ inside their own `Leaves/<LeafRig>/Leaf`, with joints referencing that same leaf
 
 ## Inventory keys and side locks
 
+An intact door can be locked again after its latch is breached. Authorized player
+locking restores the latch's configured `MaxHealth`, clears breach flags, and closes
+and latches an open door through the normal lock command. Keys and side permissions
+still apply. Set the assembly attribute `RelockAfterBreach=false` to retain permanent
+latch damage on a particular door. Physically broken/detached leaves still require
+`Reset`; relocking does not restore them. Scripted lock repair retains the separate
+`ExternalLockRepairsBrokenLock` setting.
+
 Set these attributes on the tagged assembly (or on one leaf rig to override it):
 
 | Attribute | Example | Meaning |
